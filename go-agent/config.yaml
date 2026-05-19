@@ -1,0 +1,28 @@
+default_provider: openai
+max_iterations: 10
+
+providers:
+  openai:
+    api_key: sk-your-key-here
+    base_url: https://api.openai.com/v1
+    model: gpt-4o
+  deepseek:
+    api_key: sk-ad7c7b2b3d284058978b3edde506fd8f
+    base_url: https://api.deepseek.com/v1
+    model: deepseek-chat
+  anthropic:
+    api_key: sk-ant-your-key-here
+    base_url: https://api.anthropic.com
+    model: claude-sonnet-4-20250514
+
+tools:
+  tavily:
+    api_key: tvly-your-key-here
+  shell:
+    allowed_commands: []
+    blocked_commands:
+      - "rm -rf /"
+      - "sudo"
+      - "mkfs"
+  file:
+    max_read_size: 1048576
