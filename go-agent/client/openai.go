@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -145,8 +146,9 @@ func (c *OpenAIClient) ChatCompletion(ctx context.Context, req ChatRequest) (<-c
 		return nil, fmt.Errorf("http request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	ch := make(chan StreamChunk, 16)
