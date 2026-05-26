@@ -39,14 +39,17 @@ func (m *Manager) createIn(draft SkillDraft, dir string) (*Skill, error) {
 		return nil, err
 	}
 
+	if draft.Category == "" {
+		draft.Category = "core"
+	}
+
 	slug := Slugify(draft.Name)
 
-	// Collect existing slugs (directory names) to avoid conflicts.
 	existingNames := m.existingSlugs()
 	slug = UniqueSlug(draft.Name, existingNames)
 
-	// Create directory and write SKILL.md.
-	skillDir := filepath.Join(dir, slug)
+	// Create directory with category layer: dir/category/slug/
+	skillDir := filepath.Join(dir, draft.Category, slug)
 	if err := os.MkdirAll(skillDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create skill directory: %w", err)
 	}
@@ -57,12 +60,10 @@ func (m *Manager) createIn(draft SkillDraft, dir string) (*Skill, error) {
 		return nil, fmt.Errorf("write skill file: %w", err)
 	}
 
-	// Reload index from disk.
 	if err := m.Reload(); err != nil {
 		return nil, fmt.Errorf("reload after create: %w", err)
 	}
 
-	// Find and return the created skill.
 	matches := m.index.MatchByName(draft.Name)
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("skill %q was written but not found after reload", draft.Name)
@@ -70,20 +71,31 @@ func (m *Manager) createIn(draft SkillDraft, dir string) (*Skill, error) {
 	return matches[0], nil
 }
 
-// existingSlugs returns the directory/file base names from both user and project dirs.
+// existingSlugs returns the directory/file base names from both user and project dirs,
+// scanning one level of category subdirectories.
 func (m *Manager) existingSlugs() []string {
 	var names []string
 	for _, dir := range []string{m.userDir, m.projectDir} {
-		entries, err := os.ReadDir(dir)
+		categories, err := os.ReadDir(dir)
 		if err != nil {
 			continue
 		}
-		for _, e := range entries {
-			name := e.Name()
-			if !e.IsDir() {
-				name = strings.TrimSuffix(name, filepath.Ext(name))
+		for _, cat := range categories {
+			if !cat.IsDir() {
+				continue
 			}
-			names = append(names, name)
+			catPath := filepath.Join(dir, cat.Name())
+			entries, err := os.ReadDir(catPath)
+			if err != nil {
+				continue
+			}
+			for _, e := range entries {
+				name := e.Name()
+				if !e.IsDir() {
+					name = strings.TrimSuffix(name, filepath.Ext(name))
+				}
+				names = append(names, name)
+			}
 		}
 	}
 	return names

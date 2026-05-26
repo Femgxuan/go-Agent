@@ -37,7 +37,7 @@ func TestManager_Create(t *testing.T) {
 	}
 
 	// Verify file exists on disk.
-	skillFile := filepath.Join(userDir, "my-skill", "SKILL.md")
+	skillFile := filepath.Join(userDir, "core", "my-skill", "SKILL.md")
 	if _, err := os.Stat(skillFile); os.IsNotExist(err) {
 		t.Fatalf("expected file %s to exist", skillFile)
 	}
@@ -84,7 +84,7 @@ func TestManager_Create_DuplicateSlug(t *testing.T) {
 	}
 
 	// Verify the second skill directory has the -2 suffix.
-	dir2 := filepath.Join(userDir, "dup-skill-2")
+	dir2 := filepath.Join(userDir, "core", "dup-skill-2")
 	if _, err := os.Stat(dir2); os.IsNotExist(err) {
 		t.Fatalf("expected directory %s to exist for duplicate slug", dir2)
 	}
@@ -159,7 +159,7 @@ func TestManager_Delete(t *testing.T) {
 	}
 
 	// Verify removed from disk.
-	dir := filepath.Join(userDir, "delete-me")
+	dir := filepath.Join(userDir, "core", "delete-me")
 	if _, err := os.Stat(dir); !os.IsNotExist(err) {
 		t.Fatalf("expected directory %s to be removed", dir)
 	}
@@ -194,7 +194,7 @@ func TestManager_Update(t *testing.T) {
 	}
 
 	// Verify on disk.
-	data, err := os.ReadFile(filepath.Join(userDir, "updatable", "SKILL.md"))
+	data, err := os.ReadFile(filepath.Join(userDir, "core", "updatable", "SKILL.md"))
 	if err != nil {
 		t.Fatalf("read updated file: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestManager_CreateInProject(t *testing.T) {
 	}
 
 	// Verify file is in project dir.
-	skillFile := filepath.Join(projectDir, "project-skill", "SKILL.md")
+	skillFile := filepath.Join(projectDir, "core", "project-skill", "SKILL.md")
 	if _, err := os.Stat(skillFile); os.IsNotExist(err) {
 		t.Fatalf("expected file %s to exist in project dir", skillFile)
 	}
@@ -228,7 +228,7 @@ func TestManager_Reload(t *testing.T) {
 
 	// Manually write a skill file to disk without using Create.
 	slug := "manual-skill"
-	dir := filepath.Join(userDir, slug)
+	dir := filepath.Join(userDir, "core", slug)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
