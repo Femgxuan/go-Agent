@@ -6,9 +6,10 @@ import (
 	"strings"
 )
 
-// LoadDir scans dir for skill files:
-// - .md files are treated as single-file skills
-// - subdirectories containing SKILL.md are treated as directory skills
+// LoadDir scans dir for skill files with category awareness:
+// - Legacy flat .md files at root -> category "core"
+// - Direct skill dirs (containing SKILL.md) at root -> category "core"
+// - Category dirs containing skill subdirectories -> category = dir name
 // Returns nil slice (not error) for nonexistent directories.
 // Entries that fail to parse are silently skipped.
 func LoadDir(dir string) ([]*Skill, error) {
@@ -21,19 +22,56 @@ func LoadDir(dir string) ([]*Skill, error) {
 	}
 
 	var skills []*Skill
+
 	for _, entry := range entries {
-		if entry.IsDir() {
-			skillMD := filepath.Join(dir, entry.Name(), "SKILL.md")
-			if _, statErr := os.Stat(skillMD); statErr == nil {
-				skill, loadErr := loadDirSkill(filepath.Join(dir, entry.Name()))
+		if !entry.IsDir() {
+			// Legacy: flat .md file at root -> category "core"
+			if strings.HasSuffix(entry.Name(), ".md") {
+				skill, loadErr := loadFileSkill(filepath.Join(dir, entry.Name()))
 				if loadErr == nil {
+					if skill.Category == "" {
+						skill.Category = "core"
+					}
 					skills = append(skills, skill)
 				}
 			}
-		} else if strings.HasSuffix(entry.Name(), ".md") {
-			skill, loadErr := loadFileSkill(filepath.Join(dir, entry.Name()))
+			continue
+		}
+
+		// entry is a directory: it could be a direct skill dir (contains SKILL.md)
+		// or a category dir (contains skill subdirectories)
+		skillMD := filepath.Join(dir, entry.Name(), "SKILL.md")
+		if _, statErr := os.Stat(skillMD); statErr == nil {
+			// Direct skill dir (no category layer) -> category "core"
+			skill, loadErr := loadDirSkill(filepath.Join(dir, entry.Name()))
 			if loadErr == nil {
+				if skill.Category == "" {
+					skill.Category = "core"
+				}
 				skills = append(skills, skill)
+			}
+			continue
+		}
+
+		// Try as a category directory: scan subdirectories for SKILL.md
+		categoryName := entry.Name()
+		subEntries, subErr := os.ReadDir(filepath.Join(dir, categoryName))
+		if subErr != nil {
+			continue
+		}
+		for _, sub := range subEntries {
+			if !sub.IsDir() {
+				continue
+			}
+			subSkillMD := filepath.Join(dir, categoryName, sub.Name(), "SKILL.md")
+			if _, statErr := os.Stat(subSkillMD); statErr == nil {
+				skill, loadErr := loadDirSkill(filepath.Join(dir, categoryName, sub.Name()))
+				if loadErr == nil {
+					if skill.Category == "" {
+						skill.Category = categoryName
+					}
+					skills = append(skills, skill)
+				}
 			}
 		}
 	}
