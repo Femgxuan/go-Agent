@@ -154,6 +154,41 @@ func TestSkillDraft_RenderMarkdown(t *testing.T) {
 			t.Error("should not contain keywords")
 		}
 	})
+
+	t.Run("draft with category renders metadata", func(t *testing.T) {
+		draft := SkillDraft{
+			Name:        "cat-skill",
+			Description: "With category",
+			Category:    "core",
+			Body:        "Body.",
+		}
+
+		got := draft.RenderMarkdown()
+
+		if !strings.Contains(got, "metadata:\n") {
+			t.Error("should contain metadata block")
+		}
+		if !strings.Contains(got, "  go-agent:\n") {
+			t.Error("should contain go-agent key")
+		}
+		if !strings.Contains(got, "    category: core\n") {
+			t.Error("should contain category: core")
+		}
+	})
+
+	t.Run("draft without category omits metadata", func(t *testing.T) {
+		draft := SkillDraft{
+			Name:        "no-cat",
+			Description: "No category",
+			Body:        "Body.",
+		}
+
+		got := draft.RenderMarkdown()
+
+		if strings.Contains(got, "metadata:") {
+			t.Error("should not contain metadata when category is empty")
+		}
+	})
 }
 
 func TestSkillDraft_RenderMarkdown_Roundtrip(t *testing.T) {

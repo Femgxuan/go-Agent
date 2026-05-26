@@ -15,6 +15,7 @@ type SkillDraft struct {
 	Patterns    []string
 	Priority    int
 	Body        string
+	Category    string
 }
 
 // Validate checks that required fields are present.
@@ -59,6 +60,12 @@ func (d SkillDraft) RenderMarkdown() string {
 		b.WriteString(fmt.Sprintf("priority: %d\n", d.Priority))
 	}
 
+	if d.Category != "" {
+		b.WriteString("metadata:\n")
+		b.WriteString("  go-agent:\n")
+		b.WriteString(fmt.Sprintf("    category: %s\n", d.Category))
+	}
+
 	b.WriteString("---\n")
 	b.WriteString("\n")
 	b.WriteString(d.Body)
@@ -79,6 +86,7 @@ func (d SkillDraft) ToSkill(source string) *Skill {
 		},
 		Priority: d.Priority,
 		Body:     d.Body,
+		Category: d.Category,
 		Source:   source,
 	}
 }
