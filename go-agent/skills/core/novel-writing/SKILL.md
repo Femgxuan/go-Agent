@@ -55,6 +55,9 @@ scope: general
 tools:
   - write_file
   - read_file
+metadata:
+  go-agent:
+    category: core
 inputs:
   - name: genre
     type: string
