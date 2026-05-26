@@ -101,7 +101,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if !m.ready {
 			// Initialize viewport: total - statusbar(1) - input(3) - 2 padding lines
-			vpHeight := m.height - 1 - 3 - 2
+			vpHeight := m.height - 1 - 5 - 2
 			if vpHeight < 1 {
 				vpHeight = 1
 			}
@@ -112,7 +112,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ready = true
 		} else {
 			m.viewport.Width = m.width
-			vpHeight := m.height - 1 - 3 - 2
+			vpHeight := m.height - 1 - 5 - 2
 			if vpHeight < 1 {
 				vpHeight = 1
 			}
