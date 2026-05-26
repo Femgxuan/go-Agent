@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 )
 
-// ShellExec runs shell commands via "sh -c".
+// ShellExec runs shell commands via the platform's default shell.
 type ShellExec struct {
 	blockedCommands []string
 }
@@ -20,7 +21,7 @@ func NewShellExec(blockedCommands []string) *ShellExec {
 }
 
 func (s *ShellExec) Name() string        { return "shell_exec" }
-func (s *ShellExec) Description() string { return "Execute a shell command." }
+func (s *ShellExec) Description() string { return "Execute a shell command (cross-platform: cmd on Windows, sh on Unix)." }
 func (s *ShellExec) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -63,10 +64,26 @@ func (s *ShellExec) Execute(ctx context.Context, params map[string]any) (string,
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", command)
+	cmd := exec.CommandContext(ctx, shellBin(), shellArg(), command)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("shell_exec: command failed: %w (output: %s)", err, string(out))
 	}
 	return string(out), nil
+}
+
+// shellBin returns the shell binary for the current platform.
+func shellBin() string {
+	if runtime.GOOS == "windows" {
+		return "cmd"
+	}
+	return "sh"
+}
+
+// shellArg returns the flag to pass a command string to the shell.
+func shellArg() string {
+	if runtime.GOOS == "windows" {
+		return "/c"
+	}
+	return "-c"
 }

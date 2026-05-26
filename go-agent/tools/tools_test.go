@@ -1,14 +1,15 @@
 package tools
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
-	"context"
 )
 
 // ---- TavilySearch ----
@@ -54,8 +55,12 @@ func TestShellExec(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result != "hello\n" {
-		t.Errorf("expected 'hello\\n', got %q", result)
+	expected := "hello\n"
+	if runtime.GOOS == "windows" {
+		expected = "hello\r\n"
+	}
+	if result != expected {
+		t.Errorf("expected %q, got %q", expected, result)
 	}
 }
 
@@ -71,8 +76,12 @@ func TestShellExecBlocked(t *testing.T) {
 
 func TestShellExecTimeout(t *testing.T) {
 	tool := NewShellExec(nil)
+	sleepCmd := "sleep 10"
+	if runtime.GOOS == "windows" {
+		sleepCmd = "timeout /t 10 /nobreak"
+	}
 	_, err := tool.Execute(context.Background(), map[string]any{
-		"command": "sleep 10",
+		"command": sleepCmd,
 		"timeout": 1,
 	})
 	if err == nil {
