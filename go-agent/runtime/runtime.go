@@ -84,7 +84,7 @@ func New(cfg Config) (*Runtime, error) {
 
 	// Load skills from both layers.
 	userSkillsDir := filepath.Join(userDir, "skills")
-	projectSkillsDir := filepath.Join(projectDir, "skills")
+	projectSkillsDir := "skills"
 	loadedSkills, err := skills.LoadMultiLayer(userSkillsDir, projectSkillsDir)
 	if err != nil {
 		return nil, fmt.Errorf("loading skills: %w", err)
@@ -272,7 +272,7 @@ func (rt *Runtime) ActivateSkill(name string) error {
 // ReloadSkillsAndRules reloads all skills from disk and updates the index.
 func (rt *Runtime) ReloadSkillsAndRules() error {
 	userSkillsDir := filepath.Join(rt.userDir, "skills")
-	projectSkillsDir := filepath.Join(rt.projectDir, "skills")
+	projectSkillsDir := "skills"
 	loadedSkills, err := skills.LoadMultiLayer(userSkillsDir, projectSkillsDir)
 	if err != nil {
 		return fmt.Errorf("reloading skills: %w", err)
@@ -393,10 +393,14 @@ func (rt *Runtime) CreateSkill(req commands.CreateSkillRequest) (commands.Create
 	// Re-register the new skill as a slash command.
 	rt.cmdRegistry.Register(builtin.NewSkillRun(skill.Name, skill.Description))
 
+	msg := fmt.Sprintf(
+		"[1/3] 解析完成: name=%s, category=%s\n[2/3] 已写入: %s\n[3/3] 已注册: /%s 可用",
+		skill.Name, skill.Category, skill.BasePath, skill.Name,
+	)
 	return commands.CreateSkillResult{
 		Name:    skill.Name,
 		Path:    skill.BasePath,
-		Message: fmt.Sprintf("Skill '%s' created at %s", skill.Name, skill.BasePath),
+		Message: msg,
 	}, nil
 }
 
