@@ -408,6 +408,9 @@ func (m *Model) handleSlashCommand(input string) tea.Cmd {
 		m.syncViewport()
 	}
 
+	// Refresh completion in case commands were added/removed
+	m.RefreshCompletion()
+
 	switch result.Action {
 	case commands.ActionQuit:
 		return tea.Quit
@@ -433,6 +436,13 @@ func (m *Model) handleSlashCommand(input string) tea.Cmd {
 
 	return nil
 }
+	// RefreshCompletion rebuilds the completion state from the current command registry.
+	// Call after skill CRUD operations to update autocomplete.
+	func (m *Model) RefreshCompletion() {
+		if m.config.Runtime != nil {
+			m.completion = NewCompletionState(m.config.Runtime.CmdRegistry().List())
+		}
+	}
 
 // syncViewport updates viewport content and scrolls to bottom.
 func (m *Model) syncViewport() {
