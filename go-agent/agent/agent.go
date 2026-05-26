@@ -24,8 +24,9 @@ type Agent struct {
 	llm      client.LLMClient
 	registry *tools.Registry
 	history  []client.Message
-	mu       sync.Mutex
-	config   AgentConfig
+	mu        sync.Mutex
+	config    AgentConfig
+	callbacks AgentCallbacks
 }
 
 // New creates a new Agent.
@@ -38,6 +39,13 @@ func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig) *Ag
 		registry: registry,
 		config:   config,
 	}
+}
+
+// SetCallbacks sets the optional callbacks for progress observation.
+func (a *Agent) SetCallbacks(cb AgentCallbacks) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.callbacks = cb
 }
 
 // Reset replaces the agent's LLM client and config, clearing history.
@@ -103,6 +111,14 @@ func (a *Agent) runLoop(ctx context.Context, ch chan<- AgentEvent) {
 			return
 		}
 
+		a.mu.Lock()
+		cb := a.callbacks
+		a.mu.Unlock()
+
+		if cb != nil {
+			cb.OnThinkingStart()
+		}
+
 		// Build messages including system prompt.
 		msgs := a.buildMessages()
 
@@ -138,6 +154,9 @@ func (a *Agent) runLoop(ctx context.Context, ch chan<- AgentEvent) {
 			}
 			if chunk.Delta != "" {
 				fullContent += chunk.Delta
+				if cb != nil {
+					cb.OnStreamDelta(chunk.Delta)
+				}
 				select {
 				case ch <- AgentEvent{Type: EventDelta, Content: chunk.Delta}:
 				case <-ctx.Done():
@@ -147,6 +166,10 @@ func (a *Agent) runLoop(ctx context.Context, ch chan<- AgentEvent) {
 			if len(chunk.ToolCalls) > 0 {
 				toolCalls = append(toolCalls, chunk.ToolCalls...)
 			}
+		}
+
+		if cb != nil {
+			cb.OnThinkingEnd()
 		}
 
 		if len(toolCalls) == 0 {
@@ -191,6 +214,18 @@ func (a *Agent) runLoop(ctx context.Context, ch chan<- AgentEvent) {
 		}
 
 		// Execute tools concurrently, collect results in order.
+		if cb != nil {
+			for _, tc := range toolCalls {
+				var params map[string]any
+				_ = json.Unmarshal([]byte(tc.Arguments), &params)
+				cb.OnToolStart(&ToolProgress{
+					Name:   tc.Name,
+					Args:   params,
+					Status: "running",
+				})
+			}
+		}
+
 		results, err := a.executeTools(ctx, ch, toolCalls)
 		if err != nil {
 			if ctx.Err() != nil {
@@ -201,6 +236,15 @@ func (a *Agent) runLoop(ctx context.Context, ch chan<- AgentEvent) {
 			case <-ctx.Done():
 			}
 			return
+		}
+
+		if cb != nil {
+			for i, tc := range toolCalls {
+				cb.OnToolEnd(&ToolProgress{
+					Name:   tc.Name,
+					Status: "done",
+				}, results[i])
+			}
 		}
 
 		// Append tool results to history.
