@@ -35,12 +35,20 @@ type ToolsConfig struct {
 	File   FileConfig   `yaml:"file"`
 }
 
+// DisplayConfig controls how agent intermediate output is shown.
+type DisplayConfig struct {
+	ToolProgress      string `yaml:"tool_progress"`       // "off" | "new" | "all" | "verbose"
+	ToolPreviewLength int    `yaml:"tool_preview_length"` // max chars for tool params; 0 = unlimited
+	ShowThinking      bool   `yaml:"show_thinking"`       // show <thinking> blocks in main output
+}
+
 // Config is the top-level configuration structure.
 type Config struct {
 	DefaultProvider string                    `yaml:"default_provider"`
 	MaxIterations   int                       `yaml:"max_iterations"`
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	Tools           ToolsConfig               `yaml:"tools"`
+	Display         DisplayConfig             `yaml:"display"`
 }
 
 // LoadFromFile reads a YAML config file and applies defaults.
@@ -61,6 +69,12 @@ func LoadFromFile(path string) (*Config, error) {
 	}
 	if cfg.Tools.File.MaxReadSize == 0 {
 		cfg.Tools.File.MaxReadSize = 1048576
+	}
+	if cfg.Display.ToolProgress == "" {
+		cfg.Display.ToolProgress = "all"
+	}
+	if cfg.Display.ToolPreviewLength == 0 {
+		cfg.Display.ToolPreviewLength = 80
 	}
 
 	return cfg, nil

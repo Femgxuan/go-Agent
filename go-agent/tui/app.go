@@ -15,6 +15,7 @@ import (
 
 	"github.com/fengxuan/go-agent/agent"
 	"github.com/fengxuan/go-agent/commands"
+	"github.com/fengxuan/go-agent/config"
 )
 
 // RuntimeInterface abstracts the runtime subsystem for the TUI.
@@ -29,6 +30,7 @@ type RuntimeInterface interface {
 // AppConfig holds the configuration for the TUI app.
 type AppConfig struct {
 	Runtime RuntimeInterface
+	Display config.DisplayConfig
 }
 
 // agentEventMsg wraps an AgentEvent for the bubbletea message loop.
@@ -60,6 +62,10 @@ type Model struct {
 	agentCh     <-chan agent.AgentEvent
 	answerBuf   string
 	ready       bool
+
+	display       config.DisplayConfig
+	seenTools     map[string]bool // for "new" mode: track tool names already shown
+	shownToolIDs  map[string]bool // track which tool results to show
 }
 
 // NewModel creates a new TUI Model with the given config.
@@ -73,11 +79,14 @@ func NewModel(config AppConfig) Model {
 	}
 
 	return Model{
-		config:      config,
-		spinner:     s,
-		messageView: NewMessageView(),
-		state:       StateReady,
-		completion:  cs,
+		config:        config,
+		spinner:       s,
+		messageView:   NewMessageView(),
+		state:         StateReady,
+		completion:    cs,
+		display:       config.Display,
+		seenTools:     make(map[string]bool),
+		shownToolIDs:  make(map[string]bool),
 	}
 }
 
@@ -318,12 +327,41 @@ func (m *Model) handleCompletionKey(msg tea.KeyMsg) tea.Cmd {
 	}
 }
 
+// shouldShowTool determines whether to display a tool call based on verbosity level.
+func (m *Model) shouldShowTool(name string) bool {
+	switch m.display.ToolProgress {
+	case "off":
+		return false
+	case "new":
+		if m.seenTools[name] {
+			return false
+		}
+		m.seenTools[name] = true
+		return true
+	default: // "all", "verbose"
+		return true
+	}
+}
+
+// truncateToolOutput truncates tool params/result based on display config.
+func (m *Model) truncateToolOutput(s string) string {
+	if m.display.ToolProgress == "verbose" || m.display.ToolPreviewLength == 0 {
+		return s
+	}
+	// Collapse to single line, truncate
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) > m.display.ToolPreviewLength {
+		s = s[:m.display.ToolPreviewLength-3] + "..."
+	}
+	return s
+}
+
 // handleAgentEvent processes a single agent event and returns the next command.
 func (m *Model) handleAgentEvent(ev agent.AgentEvent) tea.Cmd {
 	switch ev.Type {
 	case agent.EventDelta:
 		if m.answerBuf == "" {
-			// First delta: create Answer panel
 			m.messageView.AddPanel(Panel{
 				Type:    PanelAnswer,
 				Content: ev.Content,
@@ -335,15 +373,23 @@ func (m *Model) handleAgentEvent(ev agent.AgentEvent) tea.Cmd {
 
 	case agent.EventThought:
 		m.state = StateThinking
-		m.messageView.AddPanel(Panel{
-			Type:    PanelThought,
-			Title:   "Thought",
-			Content: ev.Content,
-		})
+		if m.display.ShowThinking {
+			m.messageView.AddPanel(Panel{
+				Type:    PanelThought,
+				Title:   "Thought",
+				Content: ev.Content,
+			})
+		}
 
 	case agent.EventToolCall:
+		if !m.shouldShowTool(ev.ToolName) {
+			m.state = StateExecuting
+			m.syncViewport()
+			return waitForEvent(m.agentCh)
+		}
 		m.state = StateExecuting
-		params := formatParams(ev.Params)
+		m.shownToolIDs[ev.ToolID] = true
+		params := m.truncateToolOutput(formatParams(ev.Params))
 		m.messageView.AddPanel(Panel{
 			Type:    PanelAction,
 			Title:   ev.ToolName,
@@ -351,18 +397,18 @@ func (m *Model) handleAgentEvent(ev agent.AgentEvent) tea.Cmd {
 		})
 
 	case agent.EventToolResult:
-		m.state = StateThinking
-		content := ev.Content
-		if len(content) > 500 {
-			content = content[:500] + "... [truncated]"
+		if !m.shownToolIDs[ev.ToolID] {
+			m.syncViewport()
+			return waitForEvent(m.agentCh)
 		}
+		m.state = StateThinking
+		content := m.truncateToolOutput(ev.Content)
 		m.messageView.AddPanel(Panel{
 			Type:    PanelObservation,
 			Content: content,
 		})
 
 	case agent.EventAnswer:
-		// Only add Answer panel if no streaming deltas were accumulated
 		if m.answerBuf == "" {
 			m.messageView.AddPanel(Panel{
 				Type:    PanelAnswer,

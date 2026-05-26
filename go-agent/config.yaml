@@ -1,5 +1,5 @@
-default_provider: openai
-max_iterations: 10
+default_provider: deepseek
+max_iterations: 100
 
 providers:
   openai:
@@ -7,7 +7,7 @@ providers:
     base_url: https://api.openai.com/v1
     model: gpt-4o
   deepseek:
-    api_key: sk-ad7c7b2b3d284058978b3edde506fd8f
+    api_key: sk-5b78bab91b0f4318b6acd900a8d9695c
     base_url: https://api.deepseek.com/v1
     model: deepseek-chat
   anthropic:
@@ -26,3 +26,8 @@ tools:
       - "mkfs"
   file:
     max_read_size: 1048576
+
+display:
+  tool_progress: all
+  tool_preview_length: 80
+  show_thinking: false

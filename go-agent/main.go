@@ -53,6 +53,7 @@ func main() {
 	// 6. Build TUI AppConfig
 	appCfg := tui.AppConfig{
 		Runtime: rt,
+		Display: cfg.Display,
 	}
 
 	// 7. Start bubbletea
