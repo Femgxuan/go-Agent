@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -107,156 +108,9 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan AgentEvent {
 // runLoop is the main ReAct iteration loop.
 func (a *Agent) runLoop(ctx context.Context, ch chan<- AgentEvent) {
 	for iter := 0; iter < a.config.MaxIterations; iter++ {
-		if err := ctx.Err(); err != nil {
+		if a.runIteration(ctx, ch) {
 			return
 		}
-
-		a.mu.Lock()
-		cb := a.callbacks
-		a.mu.Unlock()
-
-		if cb != nil {
-			cb.OnThinkingStart()
-		}
-
-		// Build messages including system prompt.
-		msgs := a.buildMessages()
-
-		req := client.ChatRequest{
-			Model:    a.config.Model,
-			Messages: msgs,
-			Tools:    a.registry.ToolSchemas(),
-		}
-
-		streamCh, err := a.llm.ChatCompletion(ctx, req)
-		if err != nil {
-			select {
-			case ch <- AgentEvent{Type: EventError, Content: err.Error()}:
-			case <-ctx.Done():
-			}
-			return
-		}
-
-		// Consume stream: accumulate content and tool calls.
-		var fullContent string
-		var toolCalls []client.ToolCall
-
-		for chunk := range streamCh {
-			if ctx.Err() != nil {
-				return
-			}
-			if chunk.Err != nil {
-				select {
-				case ch <- AgentEvent{Type: EventError, Content: chunk.Err.Error()}:
-				case <-ctx.Done():
-				}
-				return
-			}
-			if chunk.Delta != "" {
-				fullContent += chunk.Delta
-				if cb != nil {
-					cb.OnStreamDelta(chunk.Delta)
-				}
-				select {
-				case ch <- AgentEvent{Type: EventDelta, Content: chunk.Delta}:
-				case <-ctx.Done():
-					return
-				}
-			}
-			if len(chunk.ToolCalls) > 0 {
-				toolCalls = append(toolCalls, chunk.ToolCalls...)
-			}
-		}
-
-		if cb != nil {
-			cb.OnThinkingEnd()
-		}
-
-		if len(toolCalls) == 0 {
-			// No tool calls: this is the final answer.
-			a.mu.Lock()
-			a.history = append(a.history, client.Message{
-				Role:    client.RoleAssistant,
-				Content: fullContent,
-			})
-			a.mu.Unlock()
-
-			select {
-			case ch <- AgentEvent{Type: EventAnswer, Content: fullContent}:
-			case <-ctx.Done():
-			}
-			return
-		}
-
-		// Append assistant message with tool calls to history.
-		a.mu.Lock()
-		a.history = append(a.history, client.Message{
-			Role:      client.RoleAssistant,
-			Content:   fullContent,
-			ToolCalls: toolCalls,
-		})
-		a.mu.Unlock()
-
-		// Emit EventToolCall for each tool call.
-		for _, tc := range toolCalls {
-			var params map[string]any
-			_ = json.Unmarshal([]byte(tc.Arguments), &params)
-			select {
-			case ch <- AgentEvent{
-				Type:     EventToolCall,
-				ToolName: tc.Name,
-				ToolID:   tc.ID,
-				Params:   params,
-			}:
-			case <-ctx.Done():
-				return
-			}
-		}
-
-		// Execute tools concurrently, collect results in order.
-		if cb != nil {
-			for _, tc := range toolCalls {
-				var params map[string]any
-				_ = json.Unmarshal([]byte(tc.Arguments), &params)
-				cb.OnToolStart(&ToolProgress{
-					Name:   tc.Name,
-					Args:   params,
-					Status: "running",
-				})
-			}
-		}
-
-		results, err := a.executeTools(ctx, ch, toolCalls)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			select {
-			case ch <- AgentEvent{Type: EventError, Content: err.Error()}:
-			case <-ctx.Done():
-			}
-			return
-		}
-
-		if cb != nil {
-			for i, tc := range toolCalls {
-				cb.OnToolEnd(&ToolProgress{
-					Name:   tc.Name,
-					Status: "done",
-				}, results[i])
-			}
-		}
-
-		// Append tool results to history.
-		a.mu.Lock()
-		for i, tc := range toolCalls {
-			a.history = append(a.history, client.Message{
-				Role:       client.RoleTool,
-				Content:    results[i],
-				ToolCallID: tc.ID,
-			})
-		}
-		a.mu.Unlock()
 	}
 
 	// Reached max iterations.
@@ -267,6 +121,182 @@ func (a *Agent) runLoop(ctx context.Context, ch chan<- AgentEvent) {
 	}:
 	case <-ctx.Done():
 	}
+}
+
+// runIteration executes one ReAct iteration (think → act → observe).
+// Returns true if the agent loop should stop.
+func (a *Agent) runIteration(ctx context.Context, ch chan<- AgentEvent) bool {
+	if err := ctx.Err(); err != nil {
+		return true
+	}
+
+	a.mu.Lock()
+	cb := a.callbacks
+	a.mu.Unlock()
+
+	if cb != nil {
+		cb.OnThinkingStart()
+	}
+
+	// Heartbeat: fires every 10s during long-running iterations.
+	if cb != nil {
+		heartbeatStop := make(chan struct{})
+		defer close(heartbeatStop)
+		iterStart := time.Now()
+		go func() {
+			ticker := time.NewTicker(10 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					cb.OnHeartbeat(time.Since(iterStart))
+				case <-heartbeatStop:
+					return
+				}
+			}
+		}()
+	}
+
+	// Build messages including system prompt.
+	msgs := a.buildMessages()
+
+	req := client.ChatRequest{
+		Model:    a.config.Model,
+		Messages: msgs,
+		Tools:    a.registry.ToolSchemas(),
+	}
+
+	streamCh, err := a.llm.ChatCompletion(ctx, req)
+	if err != nil {
+		select {
+		case ch <- AgentEvent{Type: EventError, Content: err.Error()}:
+		case <-ctx.Done():
+		}
+		return true
+	}
+
+	// Consume stream: accumulate content and tool calls.
+	var fullContent string
+	var toolCalls []client.ToolCall
+
+	for chunk := range streamCh {
+		if ctx.Err() != nil {
+			return true
+		}
+		if chunk.Err != nil {
+			select {
+			case ch <- AgentEvent{Type: EventError, Content: chunk.Err.Error()}:
+			case <-ctx.Done():
+			}
+			return true
+		}
+		if chunk.Delta != "" {
+			fullContent += chunk.Delta
+			if cb != nil {
+				cb.OnStreamDelta(chunk.Delta)
+			}
+			select {
+			case ch <- AgentEvent{Type: EventDelta, Content: chunk.Delta}:
+			case <-ctx.Done():
+				return true
+			}
+		}
+		if len(chunk.ToolCalls) > 0 {
+			toolCalls = append(toolCalls, chunk.ToolCalls...)
+		}
+	}
+
+	if cb != nil {
+		cb.OnThinkingEnd()
+	}
+
+	if len(toolCalls) == 0 {
+		// No tool calls: this is the final answer.
+		a.mu.Lock()
+		a.history = append(a.history, client.Message{
+			Role:    client.RoleAssistant,
+			Content: fullContent,
+		})
+		a.mu.Unlock()
+
+		select {
+		case ch <- AgentEvent{Type: EventAnswer, Content: fullContent}:
+		case <-ctx.Done():
+		}
+		return true
+	}
+
+	// Append assistant message with tool calls to history.
+	a.mu.Lock()
+	a.history = append(a.history, client.Message{
+		Role:      client.RoleAssistant,
+		Content:   fullContent,
+		ToolCalls: toolCalls,
+	})
+	a.mu.Unlock()
+
+	// Emit EventToolCall for each tool call.
+	for _, tc := range toolCalls {
+		var params map[string]any
+		_ = json.Unmarshal([]byte(tc.Arguments), &params)
+		select {
+		case ch <- AgentEvent{
+			Type:     EventToolCall,
+			ToolName: tc.Name,
+			ToolID:   tc.ID,
+			Params:   params,
+		}:
+		case <-ctx.Done():
+			return true
+		}
+	}
+
+	// Execute tools concurrently, collect results in order.
+	if cb != nil {
+		for _, tc := range toolCalls {
+			var params map[string]any
+			_ = json.Unmarshal([]byte(tc.Arguments), &params)
+			cb.OnToolStart(&ToolProgress{
+				Name:   tc.Name,
+				Args:   params,
+				Status: "running",
+			})
+		}
+	}
+
+	results, err := a.executeTools(ctx, ch, toolCalls)
+	if err != nil {
+		if ctx.Err() != nil {
+			return true
+		}
+		select {
+		case ch <- AgentEvent{Type: EventError, Content: err.Error()}:
+		case <-ctx.Done():
+		}
+		return true
+	}
+
+	if cb != nil {
+		for i, tc := range toolCalls {
+			cb.OnToolEnd(&ToolProgress{
+				Name:   tc.Name,
+				Status: "done",
+			}, results[i])
+		}
+	}
+
+	// Append tool results to history.
+	a.mu.Lock()
+	for i, tc := range toolCalls {
+		a.history = append(a.history, client.Message{
+			Role:       client.RoleTool,
+			Content:    results[i],
+			ToolCallID: tc.ID,
+		})
+	}
+	a.mu.Unlock()
+
+	return false // continue loop
 }
 
 // toolResult holds the result of a single tool execution keyed by index.
