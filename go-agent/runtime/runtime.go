@@ -376,6 +376,7 @@ func (rt *Runtime) CreateSkill(req commands.CreateSkillRequest) (commands.Create
 		Patterns:    req.Patterns,
 		Priority:    req.Priority,
 		Body:        req.Body,
+		Category:    req.Category,
 	}
 
 	var skill *skills.Skill
@@ -414,6 +415,7 @@ func (rt *Runtime) UpdateSkill(name string, req commands.CreateSkillRequest) (co
 		Patterns:    req.Patterns,
 		Priority:    req.Priority,
 		Body:        req.Body,
+		Category:    req.Category,
 	}
 	skill, err := rt.skillManager.Update(name, draft)
 	if err != nil {

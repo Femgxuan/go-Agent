@@ -44,6 +44,9 @@ func (c *UpdateSkillCommand) Execute(ctx commands.CommandContext) (commands.Comm
 			req.Priority = n
 		}
 	}
+	if cat := flags["category"]; cat != "" {
+		req.Category = cat
+	}
 
 	result, err := ctx.Runtime.UpdateSkill(name, req)
 	if err != nil {

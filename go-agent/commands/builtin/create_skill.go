@@ -50,6 +50,9 @@ func (c *CreateSkillCommand) Execute(ctx commands.CommandContext) (commands.Comm
 			req.Priority = n
 		}
 	}
+	if cat := flags["category"]; cat != "" {
+		req.Category = cat
+	}
 
 	result, err := ctx.Runtime.CreateSkill(req)
 	if err != nil {

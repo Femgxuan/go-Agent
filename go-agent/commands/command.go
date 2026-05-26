@@ -67,7 +67,8 @@ type CreateSkillRequest struct {
 	Patterns     []string
 	Priority     int
 	Body         string
-	ProjectLevel bool // if true, create in project dir instead of user dir
+	ProjectLevel bool   // if true, create in project dir instead of user dir
+	Category     string
 }
 
 type CreateSkillResult struct {
