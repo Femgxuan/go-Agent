@@ -37,4 +37,5 @@ type Skill struct {
 	Body        string        `yaml:"-"`
 	Source      string        `yaml:"-"`
 	BasePath    string        `yaml:"-"`
+	Category    string        `yaml:"-"` // from metadata.go-agent.category or directory name
 }
