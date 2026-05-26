@@ -7,6 +7,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// goAgentMetadata mirrors the metadata.go-agent block in frontmatter.
+type goAgentMetadata struct {
+	Category string `yaml:"category"`
+}
+
+type skillFrontmatter struct {
+	Skill    `yaml:",inline"`
+	Metadata struct {
+		GoAgent goAgentMetadata `yaml:"go-agent"`
+	} `yaml:"metadata"`
+}
+
 // ParseSkillFile parses a skill markdown file with YAML frontmatter.
 func ParseSkillFile(content string) (*Skill, error) {
 	meta, body, err := splitFrontmatter(content)
@@ -14,17 +26,19 @@ func ParseSkillFile(content string) (*Skill, error) {
 		return nil, err
 	}
 
-	var skill Skill
-	if err := yaml.Unmarshal([]byte(meta), &skill); err != nil {
+	var fm skillFrontmatter
+	if err := yaml.Unmarshal([]byte(meta), &fm); err != nil {
 		return nil, err
 	}
 
+	skill := &fm.Skill
 	if skill.Name == "" {
 		return nil, errors.New("skill frontmatter missing required field: name")
 	}
 
+	skill.Category = fm.Metadata.GoAgent.Category
 	skill.Body = strings.TrimSpace(body)
-	return &skill, nil
+	return skill, nil
 }
 
 // splitFrontmatter splits content into frontmatter YAML and body.
