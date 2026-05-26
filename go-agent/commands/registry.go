@@ -28,8 +28,10 @@ func NewRegistry() *Registry {
 
 func (r *Registry) Register(cmd Command) {
 	name := cmd.Name()
+	if _, exists := r.commands[name]; !exists {
+		r.order = append(r.order, name)
+	}
 	r.commands[name] = cmd
-	r.order = append(r.order, name)
 	for _, alias := range cmd.Aliases() {
 		r.aliases[alias] = name
 	}

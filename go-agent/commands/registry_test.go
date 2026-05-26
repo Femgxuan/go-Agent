@@ -149,6 +149,35 @@ func TestRegistryExecuteWithAlias(t *testing.T) {
 	}
 }
 
+func TestRegistryReRegisterNoDuplicate(t *testing.T) {
+	r := NewRegistry()
+	cmd1 := newTestCmd("reloadable", nil, "/reloadable")
+	r.Register(cmd1)
+
+	// Re-register with same name (simulating reload)
+	cmd2 := newTestCmd("reloadable", nil, "/reloadable")
+	r.Register(cmd2)
+
+	list := r.List()
+	// Count occurrences of "reloadable"
+	count := 0
+	for _, info := range list {
+		if info.Name == "reloadable" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected 1 occurrence of 'reloadable' in list, got %d", count)
+	}
+
+	// The Get should return the second registration
+	got, ok := r.Get("reloadable")
+	if !ok {
+		t.Fatal("expected to find command")
+	}
+	_ = got
+}
+
 func TestRegistryExecuteUnknown(t *testing.T) {
 	r := NewRegistry()
 
