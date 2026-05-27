@@ -3,9 +3,11 @@ package memory
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"sync"
 	"time"
@@ -247,4 +249,56 @@ func (m *MockEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]floa
 // Dimension returns the vector dimension
 func (m *MockEmbedder) Dimension() int {
 	return m.dimension
+}
+
+// HashEmbedder generates deterministic vectors from text using SHA-256.
+// No external API needed. Suitable as fallback when OpenAI/Ollama unavailable.
+type HashEmbedder struct {
+	dimension int
+}
+
+// NewHashEmbedder creates a HashEmbedder with given dimension.
+func NewHashEmbedder(dimension int) *HashEmbedder {
+	return &HashEmbedder{dimension: dimension}
+}
+
+// Embed generates a deterministic vector from text hash.
+func (h *HashEmbedder) Embed(ctx context.Context, text string) ([]float64, error) {
+	hash := sha256.Sum256([]byte(text))
+	vec := make([]float64, h.dimension)
+	for i := range vec {
+		// Use hash bytes cyclically, normalize to [-1, 1]
+		byteVal := hash[i%32]
+		vec[i] = (float64(byteVal)/127.5 - 1.0)
+	}
+	// Normalize to unit vector
+	var norm float64
+	for _, v := range vec {
+		norm += v * v
+	}
+	norm = math.Sqrt(norm)
+	if norm > 0 {
+		for i := range vec {
+			vec[i] /= norm
+		}
+	}
+	return vec, nil
+}
+
+// EmbedBatch performs batch embedding.
+func (h *HashEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]float64, error) {
+	results := make([][]float64, len(texts))
+	for i, text := range texts {
+		embedding, err := h.Embed(ctx, text)
+		if err != nil {
+			return nil, err
+		}
+		results[i] = embedding
+	}
+	return results, nil
+}
+
+// Dimension returns the vector dimension.
+func (h *HashEmbedder) Dimension() int {
+	return h.dimension
 }

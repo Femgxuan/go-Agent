@@ -58,8 +58,8 @@ func DefaultConfig() *Config {
 	cfg.ShortTerm.StorageDir = filepath.Join(home, ".go-agent", "memory", "sessions")
 	cfg.ShortTerm.MaxSessions = 100
 
-	// Long-term memory defaults
-	cfg.LongTerm.PostgresURL = "postgres://localhost:5432/goagent"
+	// Long-term memory defaults (匹配 docker-compose.yml 凭据)
+	cfg.LongTerm.PostgresURL = "postgres://FengXuan:12345678@localhost:5432/FengXuan"
 	cfg.LongTerm.Embedder.Provider = "openai"
 	cfg.LongTerm.Embedder.Model = "text-embedding-3-small"
 	cfg.LongTerm.HalfLife = 30 * 24 * time.Hour // 30 days

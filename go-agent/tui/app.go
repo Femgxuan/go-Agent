@@ -128,6 +128,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.Type {
+		case tea.KeyCtrlO:
+			m.messageView.ToggleGlobalCollapse()
+			m.syncViewport()
+			return m, nil
+
 		case tea.KeyCtrlC:
 			if m.state != StateReady {
 				// Cancel running agent
@@ -336,18 +341,20 @@ func (m *Model) handleAgentEvent(ev agent.AgentEvent) tea.Cmd {
 	case agent.EventThought:
 		m.state = StateThinking
 		m.messageView.AddPanel(Panel{
-			Type:    PanelThought,
-			Title:   "Thought",
-			Content: ev.Content,
+			Type:        PanelThought,
+			Title:       "Thought",
+			Content:     ev.Content,
+			Collapsible: true,
 		})
 
 	case agent.EventToolCall:
 		m.state = StateExecuting
 		params := formatParams(ev.Params)
 		m.messageView.AddPanel(Panel{
-			Type:    PanelAction,
-			Title:   ev.ToolName,
-			Content: params,
+			Type:        PanelAction,
+			Title:       ev.ToolName,
+			Content:     params,
+			Collapsible: true,
 		})
 
 	case agent.EventToolResult:
@@ -357,8 +364,9 @@ func (m *Model) handleAgentEvent(ev agent.AgentEvent) tea.Cmd {
 			content = content[:500] + "... [truncated]"
 		}
 		m.messageView.AddPanel(Panel{
-			Type:    PanelObservation,
-			Content: content,
+			Type:        PanelObservation,
+			Content:     content,
+			Collapsible: true,
 		})
 
 	case agent.EventAnswer:

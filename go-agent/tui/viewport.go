@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -23,17 +24,19 @@ type Panel struct {
 	Type      PanelType
 	Title     string
 	Content   string
-	Collapsed bool
+	Collapsed    bool
+	Collapsible  bool
 }
 
 // MessageView manages a list of panels.
 type MessageView struct {
-	panels []Panel
+	panels         []Panel
+	globalCollapsed bool
 }
 
 // NewMessageView creates a new empty MessageView.
 func NewMessageView() *MessageView {
-	return &MessageView{}
+	return &MessageView{globalCollapsed: true}
 }
 
 // AddPanel appends a new panel.
@@ -72,7 +75,7 @@ func (m *MessageView) ToggleCollapse(index int) {
 		return
 	}
 	p := &m.panels[index]
-	if p.Type == PanelUser || p.Type == PanelAnswer {
+	if !p.Collapsible {
 		return
 	}
 	p.Collapsed = !p.Collapsed
@@ -81,6 +84,11 @@ func (m *MessageView) ToggleCollapse(index int) {
 // PanelCount returns the number of panels.
 func (m *MessageView) PanelCount() int {
 	return len(m.panels)
+}
+
+// ToggleGlobalCollapse toggles the global collapsed state.
+func (m *MessageView) ToggleGlobalCollapse() {
+	m.globalCollapsed = !m.globalCollapsed
 }
 
 // Clear removes all panels.
@@ -95,53 +103,54 @@ func (m *MessageView) Render(width int) string {
 	}
 	var sb strings.Builder
 	for _, p := range m.panels {
-		sb.WriteString(renderPanel(p, width))
+		sb.WriteString(renderPanel(p, width, m.globalCollapsed))
 	}
 	return sb.String()
 }
 
 // renderPanel renders a single panel.
-func renderPanel(p Panel, width int) string {
+func renderPanel(p Panel, width int, globalCollapsed bool) string {
+	collapsed := globalCollapsed && p.Collapsible
+
 	switch p.Type {
 	case PanelUser:
 		return "\n  " + userStyle.Render("You:") + " " + p.Content + "\n"
 
 	case PanelThought:
-		arrow := "▾"
-		if p.Collapsed {
-			arrow = "▸"
-		}
-		header := thoughtStyle.Render(arrow+" Thought ") + dimStyle.Render(strings.Repeat("─", max(0, width-12)))
-		if p.Collapsed {
+		if collapsed {
+			header := thoughtStyle.Render("▸ Thought ") + dimStyle.Render(strings.Repeat("─", max(0, width-12)))
 			return "\n" + header + "\n"
 		}
+		header := thoughtStyle.Render("▾ Thought ") + dimStyle.Render(strings.Repeat("─", max(0, width-12)))
 		return "\n" + header + "\n" + indent(p.Content, 4) + "\n"
 
 	case PanelAction:
-		arrow := "▾"
-		if p.Collapsed {
-			arrow = "▸"
-		}
 		title := p.Title
 		if title == "" {
 			title = "Action"
 		}
-		headerText := arrow + " Action: " + title + " "
-		header := actionStyle.Render(headerText) + dimStyle.Render(strings.Repeat("─", max(0, width-lipgloss.Width(headerText)-2)))
-		if p.Collapsed {
+		if collapsed {
+			preview := truncatePreview(p.Content, 50)
+			headerText := "▸ Action: " + title
+			if preview != "" {
+				headerText += " → " + preview
+			}
+			headerText += " "
+			header := actionStyle.Render(headerText) + dimStyle.Render(strings.Repeat("─", max(0, width-lipgloss.Width(headerText)-2)))
 			return "\n" + header + "\n"
 		}
+		headerText := "▾ Action: " + title + " "
+		header := actionStyle.Render(headerText) + dimStyle.Render(strings.Repeat("─", max(0, width-lipgloss.Width(headerText)-2)))
 		return "\n" + header + "\n" + indent(p.Content, 4) + "\n"
 
 	case PanelObservation:
-		arrow := "▾"
-		if p.Collapsed {
-			arrow = "▸"
-		}
-		header := observationStyle.Render(arrow+" Observation ") + dimStyle.Render(strings.Repeat("─", max(0, width-16)))
-		if p.Collapsed {
+		if collapsed {
+			preview := truncatePreview(p.Content, 50)
+			headerText := fmt.Sprintf("▸ Observation → %s (%d chars) ", preview, len(p.Content))
+			header := observationStyle.Render(headerText) + dimStyle.Render(strings.Repeat("─", max(0, width-lipgloss.Width(headerText)-2)))
 			return "\n" + header + "\n"
 		}
+		header := observationStyle.Render("▾ Observation ") + dimStyle.Render(strings.Repeat("─", max(0, width-16)))
 		return "\n" + header + "\n" + indent(p.Content, 4) + "\n"
 
 	case PanelAnswer:
@@ -201,4 +210,14 @@ func max(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// truncatePreview returns a truncated preview of text.
+func truncatePreview(text string, maxLen int) string {
+	preview := strings.ReplaceAll(text, "\n", " ")
+	preview = strings.TrimSpace(preview)
+	if len(preview) > maxLen {
+		return preview[:maxLen] + "..."
+	}
+	return preview
 }

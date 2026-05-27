@@ -1,4 +1,3 @@
-# docker-compose.yml
 version: '3.8'
 
 services:
@@ -6,16 +5,16 @@ services:
     image: pgvector/pgvector:pg16
     container_name: go-agent-postgres
     environment:
-      POSTGRES_USER: goagent
-      POSTGRES_PASSWORD: goagent123
-      POSTGRES_DB: goagent
+      POSTGRES_USER: FengXuan          # 改成你的角色名
+      POSTGRES_PASSWORD: 12345678       # 改成你设置的密码
+      POSTGRES_DB: FengXuan            # 改成你的数据库名
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U goagent"]
+      test: ["CMD-SHELL", "pg_isready -U FengXuan"]  # 健康检查也改
       interval: 10s
       timeout: 5s
       retries: 5

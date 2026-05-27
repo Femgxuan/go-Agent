@@ -10,6 +10,57 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestExtractKeywords(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    string
+		expected []string
+	}{
+		{
+			name:     "CJK preference query with sliding window",
+			query:    "我喜欢吃什么",
+			expected: []string{"喜欢", "欢吃"},
+		},
+		{
+			name:     "CJK two-char query",
+			query:    "用户偏好",
+			expected: []string{"用户", "户偏", "偏好"},
+		},
+		{
+			name:     "English with spaces",
+			query:    "Go Agent framework",
+			expected: []string{"Go", "Agent", "framework"},
+		},
+		{
+			name:     "empty query",
+			query:    "",
+			expected: nil,
+		},
+		{
+			name:     "only stop words",
+			query:    "我的",
+			expected: nil,
+		},
+		{
+			name:     "question with punctuation",
+			query:    "我喜欢什么？",
+			expected: []string{"喜欢"},
+		},
+		{
+			name:     "stored fact search",
+			query:    "用户喜欢吃香蕉",
+			expected: []string{"用户", "户喜", "喜欢", "欢吃", "吃香", "香蕉"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractKeywords(tt.query)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
 func TestPgLongTermMemory_Integration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")

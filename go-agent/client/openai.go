@@ -39,7 +39,7 @@ type openAIRequest struct {
 
 type openAIMessage struct {
 	Role       string             `json:"role"`
-	Content    string             `json:"content,omitempty"`
+	Content    *string            `json:"content"`
 	ToolCalls  []openAIToolCallOut `json:"tool_calls,omitempty"`
 	ToolCallID string             `json:"tool_call_id,omitempty"`
 }
@@ -100,9 +100,12 @@ func (c *OpenAIClient) ChatCompletion(ctx context.Context, req ChatRequest) (<-c
 	// Convert messages
 	msgs := make([]openAIMessage, 0, len(req.Messages))
 	for _, m := range req.Messages {
+		// Always include content field (required by some APIs when tool_calls present).
+		// Use pointer so empty string serializes as "content": "" not omitted.
+		content := m.Content
 		om := openAIMessage{
 			Role:       string(m.Role),
-			Content:    m.Content,
+			Content:    &content,
 			ToolCallID: m.ToolCallID,
 		}
 		if len(m.ToolCalls) > 0 {

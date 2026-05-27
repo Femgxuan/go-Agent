@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
@@ -14,9 +16,9 @@ import (
 
 // PgLongTermMemory is a pgvector-backed implementation of LongTermMemory.
 type PgLongTermMemory struct {
-	mu          sync.RWMutex
-	pool        *pgxpool.Pool
-	embedder    Embedder
+	mu           sync.RWMutex
+	pool         *pgxpool.Pool
+	embedder     Embedder
 	hasEmbedding bool // true if the embedding column exists (pgvector installed)
 }
 
@@ -134,16 +136,131 @@ func (p *PgLongTermMemory) Search(ctx context.Context, query string, limit int, 
 	return merged, nil
 }
 
+// cjkStopWords are single CJK characters that are grammatical particles
+// and should not be used as search keywords.
+var cjkStopWords = map[rune]bool{
+	'的': true, '了': true, '吗': true, '呢': true, '吧': true, '啊': true,
+	'是': true, '在': true, '有': true, '和': true, '与': true, '或': true,
+	'但': true, '而': true, '就': true, '都': true, '也': true, '还': true,
+	'只': true, '又': true, '再': true, '把': true, '被': true, '让': true,
+	'给': true, '向': true, '从': true, '到': true, '对': true, '为': true,
+	'我': true, '你': true, '他': true, '她': true, '它': true,
+	'么': true, '什': true, '哪': true, '怎': true, '多': true, '几': true,
+	'一': true, '不': true, '没': true, '很': true, '太': true, '最': true,
+}
+
+// isCJK returns true if the rune is a CJK unified ideograph.
+func isCJK(r rune) bool {
+	return (r >= 0x4e00 && r <= 0x9fff) || (r >= 0x3400 && r <= 0x4dbf)
+}
+
+// extractKeywords extracts searchable keywords from a query string.
+// For CJK text (no spaces), it removes single-character stop words then
+// generates 2-rune sliding windows to capture meaningful substrings.
+// For space-separated text, it splits on whitespace and punctuation.
+func extractKeywords(query string) []string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil
+	}
+
+	// Split on whitespace and punctuation (Unicode-aware).
+	parts := strings.FieldsFunc(query, func(r rune) bool {
+		return unicode.IsSpace(r) || unicode.IsPunct(r)
+	})
+
+	// Check if remaining text is primarily CJK (no natural word boundaries).
+	hasCJK := false
+	for _, r := range query {
+		if isCJK(r) {
+			hasCJK = true
+			break
+		}
+	}
+
+	// For CJK text that came as one big chunk (no spaces), apply sliding window.
+	if hasCJK && len(parts) <= 1 {
+		text := query
+		if len(parts) == 1 {
+			text = parts[0]
+		}
+		runes := []rune(text)
+
+		// Remove single CJK stop words.
+		var filtered []rune
+		for _, r := range runes {
+			if !cjkStopWords[r] {
+				filtered = append(filtered, r)
+			}
+		}
+
+		if len(filtered) < 2 {
+			return nil
+		}
+
+		// Generate 2-rune sliding windows.
+		seen := make(map[string]bool)
+		var keywords []string
+		for i := 0; i <= len(filtered)-2; i++ {
+			kw := string(filtered[i : i+2])
+			if !seen[kw] {
+				seen[kw] = true
+				keywords = append(keywords, kw)
+			}
+		}
+		return keywords
+	}
+
+	// For space-separated text (English, mixed), split and filter.
+	seen := make(map[string]bool)
+	var keywords []string
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if len([]rune(part)) < 2 {
+			continue
+		}
+		if seen[part] {
+			continue
+		}
+		seen[part] = true
+		keywords = append(keywords, part)
+	}
+	return keywords
+}
+
 // ftsSearch performs text search using pg_trgm ILIKE (handles CJK text).
+// It extracts keywords from the query and builds an OR-based ILIKE search
+// so that partial matches work (e.g., "我喜欢吃什么" matches "用户喜欢吃香蕉").
 func (p *PgLongTermMemory) ftsSearch(ctx context.Context, query string, limit int) []Fact {
-	rows, err := p.pool.Query(ctx, `
+	keywords := extractKeywords(query)
+	if len(keywords) == 0 {
+		return nil
+	}
+
+	// Build OR conditions for each keyword.
+	var conditions []string
+	var args []any
+	argIdx := 1
+	for _, kw := range keywords {
+		conditions = append(conditions,
+			fmt.Sprintf("content ILIKE '%%' || $%d || '%%'", argIdx))
+		args = append(args, kw)
+		argIdx++
+	}
+	where := strings.Join(conditions, " OR ")
+
+	sql := fmt.Sprintf(`
 		SELECT id, key, content, source, category, confidence, decay_score, created_at
 		FROM facts
-		WHERE content ILIKE '%' || $1 || '%' OR key ILIKE '%' || $1 || '%'
+		WHERE %s
 		ORDER BY created_at DESC
-		LIMIT $2
-	`, query, limit)
+		LIMIT $%d
+	`, where, argIdx)
+	args = append(args, limit)
+
+	rows, err := p.pool.Query(ctx, sql, args...)
 	if err != nil {
+		slog.Warn("[fts] query failed", "error", err, "keywords", keywords)
 		return nil
 	}
 	defer rows.Close()
@@ -159,6 +276,8 @@ func (p *PgLongTermMemory) ftsSearch(ctx context.Context, query string, limit in
 		f.DecayScore = 1.0
 		results = append(results, f)
 	}
+
+	slog.Info("[fts] search completed", "query", query, "keywords", keywords, "results", len(results))
 	return results
 }
 
