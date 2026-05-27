@@ -65,6 +65,9 @@ type LongTermMemory interface {
 	// Search searches for relevant facts.
 	Search(ctx context.Context, query string, limit int, minScore float64) ([]Fact, error)
 
+	// Update updates a fact's fields (e.g. decay_score).
+	Update(ctx context.Context, id string, updates map[string]any) error
+
 	// Delete deletes a fact by ID.
 	Delete(ctx context.Context, id string) error
 }
