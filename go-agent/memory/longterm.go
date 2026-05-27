@@ -134,14 +134,13 @@ func (p *PgLongTermMemory) Search(ctx context.Context, query string, limit int, 
 	return merged, nil
 }
 
-// ftsSearch performs full-text search using PostgreSQL tsvector.
+// ftsSearch performs text search using pg_trgm ILIKE (handles CJK text).
 func (p *PgLongTermMemory) ftsSearch(ctx context.Context, query string, limit int) []Fact {
 	rows, err := p.pool.Query(ctx, `
-		SELECT id, key, content, source, category, confidence, decay_score, created_at,
-		       ts_rank(fts_vector, q) as rank
-		FROM facts, plainto_tsquery('simple', $1) q
-		WHERE fts_vector @@ q
-		ORDER BY rank DESC
+		SELECT id, key, content, source, category, confidence, decay_score, created_at
+		FROM facts
+		WHERE content ILIKE '%' || $1 || '%' OR key ILIKE '%' || $1 || '%'
+		ORDER BY created_at DESC
 		LIMIT $2
 	`, query, limit)
 	if err != nil {
@@ -153,12 +152,11 @@ func (p *PgLongTermMemory) ftsSearch(ctx context.Context, query string, limit in
 	for rows.Next() {
 		var f Fact
 		var category string
-		var rank float64
-		if err := rows.Scan(&f.ID, &f.Key, &f.Content, &f.Source, &category, &f.Confidence, &f.DecayScore, &f.CreatedAt, &rank); err != nil {
+		if err := rows.Scan(&f.ID, &f.Key, &f.Content, &f.Source, &category, &f.Confidence, &f.DecayScore, &f.CreatedAt); err != nil {
 			continue
 		}
 		f.Category = FactCategory(category)
-		f.DecayScore = rank
+		f.DecayScore = 1.0
 		results = append(results, f)
 	}
 	return results

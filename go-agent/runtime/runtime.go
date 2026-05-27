@@ -79,19 +79,24 @@ func New(cfg Config) (*Runtime, error) {
 	// Initialize memory system.
 	memCfg := memory.DefaultConfig()
 	memory.ApplyEnvOverrides(memCfg)
+	slog.Info("[runtime] memory config", "postgres_url", memCfg.LongTerm.PostgresURL, "working_max_tokens", memCfg.Working.MaxTokens)
 
 	memManager, err := memory.NewManager(memCfg)
 	if err != nil {
-		slog.Warn("memory system unavailable, falling back", "error", err)
+		slog.Warn("[runtime] memory system unavailable, falling back", "error", err)
 	} else {
 		ctx := context.Background()
 		memManager.StartSession(ctx, "default")
+		slog.Info("[runtime] memory system initialized successfully")
 	}
 
 	// Create memory classifier.
 	var classifier *memory.Classifier
 	if memManager != nil {
 		classifier = memory.NewClassifier(llm)
+		slog.Info("[runtime] memory classifier created")
+	} else {
+		slog.Warn("[runtime] memory classifier NOT created (memManager is nil)")
 	}
 
 	agentCfg := agent.AgentConfig{
@@ -100,6 +105,7 @@ func New(cfg Config) (*Runtime, error) {
 		MaxTokens:     memCfg.Working.MaxTokens,
 		MemoryEnabled: memManager != nil,
 	}
+	slog.Info("[runtime] agent config", "memory_enabled", agentCfg.MemoryEnabled)
 	ag := agent.New(llm, cfg.ToolRegistry, agentCfg, memManager, classifier)
 
 	// Determine user and project directories.
