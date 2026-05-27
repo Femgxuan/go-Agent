@@ -3,15 +3,18 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/fengxuan/go-agent/agent"
 	"github.com/fengxuan/go-agent/client"
 	"github.com/fengxuan/go-agent/commands"
 	"github.com/fengxuan/go-agent/commands/builtin"
 	"github.com/fengxuan/go-agent/config"
+	"github.com/fengxuan/go-agent/memory"
 	"github.com/fengxuan/go-agent/prompt"
 	"github.com/fengxuan/go-agent/rules"
 	"github.com/fengxuan/go-agent/skills"
@@ -41,6 +44,7 @@ type Runtime struct {
 	skillManager *skills.Manager
 	rulesLoader  *rules.Loader
 	cmdRegistry  *commands.Registry
+	memory       memory.Manager
 
 	mu           sync.Mutex
 	activeSkills []string
@@ -68,11 +72,25 @@ func New(cfg Config) (*Runtime, error) {
 
 	llm := cfg.CreateClient(providerName, providerCfg)
 
+	// Initialize memory system.
+	memCfg := memory.DefaultConfig()
+	memory.ApplyEnvOverrides(memCfg)
+
+	memManager, err := memory.NewManager(memCfg)
+	if err != nil {
+		slog.Warn("memory system unavailable, falling back", "error", err)
+	} else {
+		ctx := context.Background()
+		memManager.StartSession(ctx, "default")
+	}
+
 	agentCfg := agent.AgentConfig{
 		MaxIterations: appCfg.MaxIterations,
 		Model:         providerCfg.Model,
+		MaxTokens:     memCfg.Working.MaxTokens,
+		MemoryEnabled: memManager != nil,
 	}
-	ag := agent.New(llm, cfg.ToolRegistry, agentCfg, nil)
+	ag := agent.New(llm, cfg.ToolRegistry, agentCfg, memManager)
 
 	// Determine user and project directories.
 	homeDir, err := os.UserHomeDir()
@@ -108,6 +126,7 @@ func New(cfg Config) (*Runtime, error) {
 		skillManager: skillManager,
 		rulesLoader:  rulesLoader,
 		cmdRegistry:  cmdRegistry,
+		memory:       memManager,
 		provider:     providerName,
 		model:        providerCfg.Model,
 		userDir:      userDir,
@@ -204,6 +223,16 @@ func (rt *Runtime) RunUserInput(ctx context.Context, input string) <-chan agent.
 
 	// Set the built prompt on the agent.
 	rt.agent.SetSystemPrompt(builtPrompt)
+
+	// Store user input in memory if available.
+	if rt.memory != nil {
+		go func() {
+			rt.memory.Store(ctx, memory.Interaction{
+				UserMsg:  input,
+				Metadata: map[string]any{"timestamp": time.Now()},
+			})
+		}()
+	}
 
 	// Start the agent run.
 	agentCh := rt.agent.Run(ctx, input)
@@ -319,6 +348,7 @@ func (rt *Runtime) SwitchProvider(name string) error {
 	agentCfg := agent.AgentConfig{
 		MaxIterations: rt.cfg.MaxIterations,
 		Model:         providerCfg.Model,
+		MemoryEnabled: rt.memory != nil,
 	}
 	rt.agent.Reset(llm, agentCfg)
 
