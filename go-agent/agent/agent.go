@@ -484,7 +484,9 @@ func (a *Agent) buildMessages(userQuery string) []client.Message {
 	if a.config.MemoryEnabled && a.memory != nil {
 		ctx := context.Background()
 		memCtx, err := a.memory.Retrieve(ctx, userQuery, memory.RetrieveOptions{
-			MaxTokens: a.config.MaxTokens,
+			MaxTokens:      a.config.MaxTokens,
+			MaxFacts:       10,
+			MaxReflections: 5,
 		})
 		if err != nil {
 			slog.Warn("failed to retrieve memory context", "error", err)

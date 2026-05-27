@@ -115,12 +115,16 @@ func (m *DefaultManager) Retrieve(ctx context.Context, query string, opts Retrie
 
 	// Long-term memory: may fail, degrade to empty results.
 	if m.longTerm != nil {
+		slog.Info("[retrieve] searching long-term memory", "query", query, "maxFacts", opts.MaxFacts, "minScore", opts.MinScore)
 		facts, err := m.longTerm.Search(ctx, query, opts.MaxFacts, opts.MinScore)
 		if err != nil {
-			slog.Warn("long-term memory search failed, degrading", "error", err)
+			slog.Warn("[retrieve] long-term memory search failed, degrading", "error", err)
 		} else {
+			slog.Info("[retrieve] found facts", "count", len(facts))
 			result.RelevantFacts = facts
 		}
+	} else {
+		slog.Info("[retrieve] long-term memory is nil, skipping search")
 	}
 
 	// Meta memory: may fail, degrade to empty results.
