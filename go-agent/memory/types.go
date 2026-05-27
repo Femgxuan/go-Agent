@@ -23,14 +23,28 @@ type Message struct {
 	Timestamp time.Time
 }
 
+// FactCategory classifies a fact for structured storage.
+type FactCategory string
+
+const (
+	FactPreference  FactCategory = "preference"  // 用户偏好："我喜欢 Go"
+	FactEnvironment FactCategory = "environment"  // 环境事实："服务器是 Debian 12"
+	FactCorrection  FactCategory = "correction"   // 纠正信息："不要用 sudo"
+	FactNorm        FactCategory = "norm"         // 项目规范："用 tab 缩进"
+	FactMilestone   FactCategory = "milestone"    // 已完成工作："完成了 PG 迁移"
+	FactExplicit    FactCategory = "explicit"     // 显式请求："记住 API key"
+)
+
 // Fact is a memorable piece of information.
 type Fact struct {
-	ID         string
-	Key        string    // keyword/topic of the fact
-	Content    string    // fact content
-	Source     string    // origin: "user" | "agent" | "derived"
-	CreatedAt  time.Time
-	DecayScore float64   // decay score, decreases over time
+	ID         string       `json:"id"`
+	Category   FactCategory `json:"category"`    // 结构化分类
+	Key        string       `json:"key"`         // 人类可读标题
+	Content    string       `json:"content"`
+	Source     string       `json:"source"`      // "user" | "agent" | "derived"
+	Confidence float64      `json:"confidence"`  // LLM 分类置信度
+	CreatedAt  time.Time    `json:"created_at"`
+	DecayScore float64      `json:"decay_score"`
 }
 
 // Reflection is an agent self-reflection record.
