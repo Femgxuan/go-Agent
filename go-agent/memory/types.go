@@ -1,6 +1,9 @@
 package memory
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // SessionID is the session identifier.
 type SessionID string
@@ -52,6 +55,18 @@ type RetrieveOptions struct {
 	MaxFacts       int     // maximum number of Facts to return
 	MaxReflections int     // maximum number of Reflections to return
 	MinScore       float64 // minimum relevance score for long-term memory
+}
+
+// LongTermMemory manages long-term memory (semantic search over facts).
+type LongTermMemory interface {
+	// Store stores a fact in long-term memory.
+	Store(ctx context.Context, fact Fact) error
+
+	// Search searches for relevant facts.
+	Search(ctx context.Context, query string, limit int, minScore float64) ([]Fact, error)
+
+	// Delete deletes a fact by ID.
+	Delete(ctx context.Context, id string) error
 }
 
 // ForgetFilter defines conditions for forgetting.
