@@ -65,14 +65,14 @@ func (c *Classifier) Classify(ctx context.Context, userMsg, assistantMsg string)
 
 	streamCh, err := c.llm.ChatCompletion(ctx, req)
 	if err != nil {
-		slog.Debug("classifier LLM call failed", "error", err)
+		slog.Warn("[classifier] LLM call failed", "error", err)
 		return Fact{}, false
 	}
 
 	var fullContent string
 	for chunk := range streamCh {
 		if chunk.Err != nil {
-			slog.Debug("classifier stream error", "error", chunk.Err)
+			slog.Warn("[classifier] stream error", "error", chunk.Err)
 			return Fact{}, false
 		}
 		fullContent += chunk.Delta
@@ -85,9 +85,11 @@ func (c *Classifier) Classify(ctx context.Context, userMsg, assistantMsg string)
 	fullContent = strings.TrimSuffix(fullContent, "```")
 	fullContent = strings.TrimSpace(fullContent)
 
+	slog.Info("[classifier] LLM response", "raw", fullContent)
+
 	var resp classificationResponse
 	if err := json.Unmarshal([]byte(fullContent), &resp); err != nil {
-		slog.Debug("classifier JSON parse failed", "error", err, "raw", fullContent)
+		slog.Warn("[classifier] JSON parse failed", "error", err, "raw", fullContent)
 		return Fact{}, false
 	}
 

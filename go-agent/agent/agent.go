@@ -174,7 +174,8 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 			slog.Warn("failed to add assistant to working memory", "error", err)
 		}
 		go func() {
-			if err := a.memory.Store(ctx, memory.Interaction{
+			storeCtx := context.Background()
+			if err := a.memory.Store(storeCtx, memory.Interaction{
 				UserMsg:  input,
 				AgentMsg: lastAssistant,
 				Metadata: map[string]any{"timestamp": time.Now()},
@@ -186,17 +187,28 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 
 	// Rule pre-filter + LLM classification for long-term memory.
 	if a.classifier != nil {
-		if _, ok := extractMemoryFact(input); ok {
+		if candidate, ok := extractMemoryFact(input); ok {
+			slog.Info("[memory] rule pre-filter matched", "category", candidate.Category, "input", input)
 			go func() {
 				classifyCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
 				if fact, ok := a.classifier.Classify(classifyCtx, input, lastAssistant); ok {
-					if err := a.memory.Memorize(ctx, fact); err != nil {
-						slog.Debug("failed to memorize classified fact", "error", err)
+					slog.Info("[memory] LLM classified as storable", "category", fact.Category, "key", fact.Key, "content", fact.Content)
+					memCtx := context.Background()
+					if err := a.memory.Memorize(memCtx, fact); err != nil {
+						slog.Warn("[memory] failed to memorize classified fact", "error", err)
+					} else {
+						slog.Info("[memory] fact memorized successfully", "id", fact.ID)
 					}
+				} else {
+					slog.Info("[memory] LLM classified as NOT storable")
 				}
 			}()
+		} else {
+			slog.Info("[memory] rule pre-filter: no match", "input", input)
 		}
+	} else {
+		slog.Info("[memory] classifier is nil, skipping classification")
 	}
 }
 
