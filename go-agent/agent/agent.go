@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/fengxuan/go-agent/client"
+	"github.com/fengxuan/go-agent/memory"
 	"github.com/fengxuan/go-agent/tools"
 )
 
@@ -18,6 +20,8 @@ type AgentConfig struct {
 	MaxIterations int
 	SystemPrompt  string
 	Model         string
+	MaxTokens     int  // working memory window size
+	MemoryEnabled bool // whether to enable the memory system
 }
 
 // Agent is a ReAct-style agent that uses an LLM and tools.
@@ -28,17 +32,22 @@ type Agent struct {
 	mu        sync.Mutex
 	config    AgentConfig
 	callbacks AgentCallbacks
+	memory    memory.Manager
 }
 
 // New creates a new Agent.
-func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig) *Agent {
+func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig, mem memory.Manager) *Agent {
 	if config.MaxIterations <= 0 {
 		config.MaxIterations = 10
+	}
+	if config.MaxTokens <= 0 {
+		config.MaxTokens = 8192
 	}
 	return &Agent{
 		llm:      llm,
 		registry: registry,
 		config:   config,
+		memory:   mem,
 	}
 }
 
@@ -53,6 +62,9 @@ func (a *Agent) SetCallbacks(cb AgentCallbacks) {
 func (a *Agent) Reset(llm client.LLMClient, config AgentConfig) {
 	if config.MaxIterations <= 0 {
 		config.MaxIterations = 10
+	}
+	if config.MaxTokens <= 0 {
+		config.MaxTokens = 8192
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -96,6 +108,18 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan AgentEvent {
 		Content: input,
 	})
 	a.mu.Unlock()
+
+	// If memory system is enabled, store the interaction asynchronously.
+	if a.config.MemoryEnabled && a.memory != nil {
+		go func() {
+			if err := a.memory.Store(ctx, memory.Interaction{
+				UserMsg:  input,
+				Metadata: map[string]any{"timestamp": time.Now()},
+			}); err != nil {
+				slog.Warn("failed to store interaction in memory", "error", err)
+			}
+		}()
+	}
 
 	go func() {
 		defer close(ch)
@@ -378,6 +402,46 @@ func (a *Agent) buildMessages() []client.Message {
 			Content: a.config.SystemPrompt,
 		})
 	}
-	msgs = append(msgs, a.history...)
+
+	if a.config.MemoryEnabled && a.memory != nil {
+		// Use the working memory window.
+		ctx := context.Background()
+		memCtx, err := a.memory.Retrieve(ctx, "", memory.RetrieveOptions{
+			MaxTokens: a.config.MaxTokens,
+		})
+		if err != nil {
+			slog.Warn("failed to retrieve memory, falling back to history", "error", err)
+			msgs = append(msgs, a.history...)
+			return msgs
+		}
+
+		// Inject working memory.
+		for _, m := range memCtx.WorkingMemory {
+			msgs = append(msgs, client.Message{
+				Role:    client.Role(m.Role),
+				Content: m.Content,
+			})
+		}
+
+		// Inject relevant facts.
+		for _, fact := range memCtx.RelevantFacts {
+			msgs = append(msgs, client.Message{
+				Role:    client.RoleSystem,
+				Content: fmt.Sprintf("[相关记忆] %s: %s", fact.Key, fact.Content),
+			})
+		}
+
+		// Inject self-reflections.
+		for _, ref := range memCtx.SelfReflection {
+			msgs = append(msgs, client.Message{
+				Role:    client.RoleSystem,
+				Content: fmt.Sprintf("[反思] %s", ref.Content),
+			})
+		}
+	} else {
+		// No memory system, append full history directly.
+		msgs = append(msgs, a.history...)
+	}
+
 	return msgs
 }

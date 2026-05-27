@@ -73,7 +73,7 @@ func TestAgentDirectAnswer(t *testing.T) {
 		},
 	}
 	reg := makeRegistry(t, nil)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5})
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil)
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "hi")
@@ -113,7 +113,7 @@ func TestAgentToolCallLoop(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "search result here"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5})
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil)
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "search for something")
@@ -186,7 +186,7 @@ func TestAgentMaxIterations(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "result"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 3})
+	a := New(llm, reg, AgentConfig{MaxIterations: 3}, nil)
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "loop forever")
@@ -228,7 +228,7 @@ func TestAgentContextCancel(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "result"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 100})
+	a := New(llm, reg, AgentConfig{MaxIterations: 100}, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -258,7 +258,7 @@ func TestAgentMultiTurn(t *testing.T) {
 		},
 	}
 	reg := makeRegistry(t, nil)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5})
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil)
 
 	ctx := context.Background()
 

@@ -72,7 +72,7 @@ func New(cfg Config) (*Runtime, error) {
 		MaxIterations: appCfg.MaxIterations,
 		Model:         providerCfg.Model,
 	}
-	ag := agent.New(llm, cfg.ToolRegistry, agentCfg)
+	ag := agent.New(llm, cfg.ToolRegistry, agentCfg, nil)
 
 	// Determine user and project directories.
 	homeDir, err := os.UserHomeDir()
