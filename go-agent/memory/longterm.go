@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
@@ -13,9 +14,10 @@ import (
 
 // PgLongTermMemory is a pgvector-backed implementation of LongTermMemory.
 type PgLongTermMemory struct {
-	mu       sync.RWMutex
-	pool     *pgxpool.Pool
-	embedder Embedder
+	mu          sync.RWMutex
+	pool        *pgxpool.Pool
+	embedder    Embedder
+	hasEmbedding bool // true if the embedding column exists (pgvector installed)
 }
 
 // NewPgPool creates a new PostgreSQL connection pool.
@@ -35,37 +37,75 @@ func NewPgPool(ctx context.Context, connString string) (*pgxpool.Pool, error) {
 }
 
 // NewPgLongTermMemory creates a new PgLongTermMemory.
+// It checks whether the embedding column exists (pgvector installed) and degrades gracefully.
 func NewPgLongTermMemory(pool *pgxpool.Pool, embedder Embedder) *PgLongTermMemory {
-	return &PgLongTermMemory{
+	ltm := &PgLongTermMemory{
 		pool:     pool,
 		embedder: embedder,
 	}
+
+	// Check if embedding column exists.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var colExists bool
+	err := pool.QueryRow(ctx,
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='facts' AND column_name='embedding')",
+	).Scan(&colExists)
+	if err == nil && colExists {
+		ltm.hasEmbedding = true
+	} else {
+		slog.Info("embedding column not found, using FTS-only mode")
+	}
+
+	return ltm
 }
 
-// Store stores a Fact, generating an embedding vector.
+// Store stores a Fact, generating an embedding vector if pgvector is available.
 func (p *PgLongTermMemory) Store(ctx context.Context, fact Fact) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	embedding, err := p.embedder.Embed(ctx, fact.Content)
-	if err != nil {
-		return fmt.Errorf("generating embedding: %w", err)
+	if p.hasEmbedding {
+		embedding, err := p.embedder.Embed(ctx, fact.Content)
+		if err != nil {
+			return fmt.Errorf("generating embedding: %w", err)
+		}
+
+		_, err = p.pool.Exec(ctx, `
+			INSERT INTO facts (id, category, key, content, source, confidence, embedding, decay_score, created_at, updated_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			ON CONFLICT (id) DO UPDATE SET
+				category = EXCLUDED.category,
+				key = EXCLUDED.key,
+				content = EXCLUDED.content,
+				source = EXCLUDED.source,
+				confidence = EXCLUDED.confidence,
+				embedding = EXCLUDED.embedding,
+				decay_score = EXCLUDED.decay_score,
+				updated_at = EXCLUDED.updated_at
+		`, fact.ID, string(fact.Category), fact.Key, fact.Content, fact.Source, fact.Confidence,
+			pgvector.NewVector(toFloat32(embedding)), fact.DecayScore, fact.CreatedAt, time.Now())
+
+		if err != nil {
+			return fmt.Errorf("inserting fact: %w", err)
+		}
+		return nil
 	}
 
-	_, err = p.pool.Exec(ctx, `
-		INSERT INTO facts (id, category, key, content, source, confidence, embedding, decay_score, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+	// FTS-only mode: no embedding column.
+	_, err := p.pool.Exec(ctx, `
+		INSERT INTO facts (id, category, key, content, source, confidence, decay_score, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT (id) DO UPDATE SET
 			category = EXCLUDED.category,
 			key = EXCLUDED.key,
 			content = EXCLUDED.content,
 			source = EXCLUDED.source,
 			confidence = EXCLUDED.confidence,
-			embedding = EXCLUDED.embedding,
 			decay_score = EXCLUDED.decay_score,
 			updated_at = EXCLUDED.updated_at
 	`, fact.ID, string(fact.Category), fact.Key, fact.Content, fact.Source, fact.Confidence,
-		pgvector.NewVector(toFloat32(embedding)), fact.DecayScore, fact.CreatedAt, time.Now())
+		fact.DecayScore, fact.CreatedAt, time.Now())
 
 	if err != nil {
 		return fmt.Errorf("inserting fact: %w", err)
@@ -73,7 +113,7 @@ func (p *PgLongTermMemory) Store(ctx context.Context, fact Fact) error {
 	return nil
 }
 
-// Search performs hybrid FTS + vector search.
+// Search performs hybrid FTS + vector search (or FTS-only if pgvector is unavailable).
 func (p *PgLongTermMemory) Search(ctx context.Context, query string, limit int, minScore float64) ([]Fact, error) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -83,6 +123,11 @@ func (p *PgLongTermMemory) Search(ctx context.Context, query string, limit int, 
 	}
 
 	ftsResults := p.ftsSearch(ctx, query, limit)
+
+	if !p.hasEmbedding {
+		return ftsResults, nil
+	}
+
 	vecResults := p.vectorSearch(ctx, query, limit, minScore)
 	merged := p.mergeResults(ftsResults, vecResults, limit)
 
