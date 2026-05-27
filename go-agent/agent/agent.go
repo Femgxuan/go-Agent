@@ -27,17 +27,18 @@ type AgentConfig struct {
 
 // Agent is a ReAct-style agent that uses an LLM and tools.
 type Agent struct {
-	llm      client.LLMClient
-	registry *tools.Registry
-	history  []client.Message
-	mu        sync.Mutex
-	config    AgentConfig
-	callbacks AgentCallbacks
-	memory    memory.Manager
+	llm        client.LLMClient
+	registry   *tools.Registry
+	history    []client.Message
+	mu         sync.Mutex
+	config     AgentConfig
+	callbacks  AgentCallbacks
+	memory     memory.Manager
+	classifier *memory.Classifier
 }
 
 // New creates a new Agent.
-func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig, mem memory.Manager) *Agent {
+func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig, mem memory.Manager, classifier *memory.Classifier) *Agent {
 	if config.MaxIterations <= 0 {
 		config.MaxIterations = 10
 	}
@@ -45,10 +46,11 @@ func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig, mem
 		config.MaxTokens = 8192
 	}
 	return &Agent{
-		llm:      llm,
-		registry: registry,
-		config:   config,
-		memory:   mem,
+		llm:        llm,
+		registry:   registry,
+		config:     config,
+		memory:     mem,
+		classifier: classifier,
 	}
 }
 
@@ -121,15 +123,6 @@ func (a *Agent) Run(ctx context.Context, input string) <-chan AgentEvent {
 		}
 	}
 
-	// If memory system is enabled, auto-extract "记住"/偏好指令到长期记忆.
-	if a.config.MemoryEnabled && a.memory != nil {
-		if fact, ok := extractMemoryFact(input); ok {
-			if err := a.memory.Memorize(ctx, fact); err != nil {
-				slog.Warn("failed to memorize fact", "error", err)
-			}
-		}
-	}
-
 	go func() {
 		defer close(ch)
 		a.runLoop(ctx, input, ch)
@@ -173,7 +166,6 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 	}
 	a.mu.Unlock()
 	if lastAssistant != "" {
-		// Add assistant message to working memory synchronously.
 		if err := a.memory.AddToWorkingMemory(memory.Message{
 			Role:      "assistant",
 			Content:   lastAssistant,
@@ -181,7 +173,6 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 		}); err != nil {
 			slog.Warn("failed to add assistant to working memory", "error", err)
 		}
-		// Save complete interaction to short-term memory (async).
 		go func() {
 			if err := a.memory.Store(ctx, memory.Interaction{
 				UserMsg:  input,
@@ -191,6 +182,21 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 				slog.Warn("failed to store interaction", "error", err)
 			}
 		}()
+	}
+
+	// Rule pre-filter + LLM classification for long-term memory.
+	if a.classifier != nil {
+		if _, ok := extractMemoryFact(input); ok {
+			go func() {
+				classifyCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				if fact, ok := a.classifier.Classify(classifyCtx, input, lastAssistant); ok {
+					if err := a.memory.Memorize(ctx, fact); err != nil {
+						slog.Debug("failed to memorize classified fact", "error", err)
+					}
+				}
+			}()
+		}
 	}
 }
 
@@ -229,7 +235,7 @@ func (a *Agent) runIteration(ctx context.Context, ch chan<- AgentEvent) bool {
 	}
 
 	// Build messages including system prompt.
-	msgs := a.buildMessages()
+	msgs := a.buildMessages("")
 
 	req := client.ChatRequest{
 		Model:    a.config.Model,
@@ -440,10 +446,20 @@ func (a *Agent) executeTools(ctx context.Context, ch chan<- AgentEvent, toolCall
 	return results, nil
 }
 
-// buildMessages prepends the system prompt to a copy of the history.
-func (a *Agent) buildMessages() []client.Message {
+// buildMessages prepends the system prompt and memory context to a copy of the history.
+func (a *Agent) buildMessages(userQuery string) []client.Message {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+
+	// If no query provided, extract from history.
+	if userQuery == "" {
+		for i := len(a.history) - 1; i >= 0; i-- {
+			if a.history[i].Role == client.RoleUser {
+				userQuery = a.history[i].Content
+				break
+			}
+		}
+	}
 
 	var msgs []client.Message
 	if a.config.SystemPrompt != "" {
@@ -453,19 +469,30 @@ func (a *Agent) buildMessages() []client.Message {
 		})
 	}
 
-	// If memory enabled, inject context BEFORE history (system messages must come first).
 	if a.config.MemoryEnabled && a.memory != nil {
 		ctx := context.Background()
-		memCtx, err := a.memory.Retrieve(ctx, "", memory.RetrieveOptions{
+		memCtx, err := a.memory.Retrieve(ctx, userQuery, memory.RetrieveOptions{
 			MaxTokens: a.config.MaxTokens,
 		})
 		if err != nil {
 			slog.Warn("failed to retrieve memory context", "error", err)
 		} else {
+			categoryLabels := map[memory.FactCategory]string{
+				memory.FactPreference:  "用户偏好",
+				memory.FactEnvironment: "环境信息",
+				memory.FactCorrection:  "注意事项",
+				memory.FactNorm:        "项目规范",
+				memory.FactMilestone:   "历史记录",
+				memory.FactExplicit:    "记忆",
+			}
 			for _, fact := range memCtx.RelevantFacts {
+				label := categoryLabels[fact.Category]
+				if label == "" {
+					label = "相关记忆"
+				}
 				msgs = append(msgs, client.Message{
 					Role:    client.RoleSystem,
-					Content: fmt.Sprintf("[相关记忆] %s: %s", fact.Key, fact.Content),
+					Content: fmt.Sprintf("[%s] %s: %s", label, fact.Key, fact.Content),
 				})
 			}
 			for _, ref := range memCtx.SelfReflection {
@@ -477,9 +504,7 @@ func (a *Agent) buildMessages() []client.Message {
 		}
 	}
 
-	// Append full history (includes user, assistant, and tool messages).
 	msgs = append(msgs, a.history...)
-
 	return msgs
 }
 

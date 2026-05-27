@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/fengxuan/go-agent/agent"
 	"github.com/fengxuan/go-agent/client"
@@ -22,11 +21,16 @@ import (
 )
 
 const baseSystemPrompt = `You are a helpful AI assistant with access to tools.
-When you need to find information, use the tavily_search tool.
-When you need to run commands, use the shell_exec tool.
-When you need to read files, use the read_file tool.
-When you need to write files, use the write_file tool.
-Always explain your reasoning before using tools.`
+
+IMPORTANT: Only use tools when the user's request explicitly requires them. For simple greetings, questions, or conversations, respond directly WITHOUT using any tools.
+
+Available tools (use ONLY when necessary):
+- tavily_search: Use ONLY when you need to search the internet for current information
+- shell_exec: Use ONLY when you need to run shell commands
+- read_file: Use ONLY when you need to read file contents
+- write_file: Use ONLY when you need to write or create files
+
+When you do use tools, explain your reasoning first. For simple conversations like greetings, just respond naturally.`
 
 // Config holds the dependencies needed to build a Runtime.
 type Config struct {
@@ -84,13 +88,19 @@ func New(cfg Config) (*Runtime, error) {
 		memManager.StartSession(ctx, "default")
 	}
 
+	// Create memory classifier.
+	var classifier *memory.Classifier
+	if memManager != nil {
+		classifier = memory.NewClassifier(llm)
+	}
+
 	agentCfg := agent.AgentConfig{
 		MaxIterations: appCfg.MaxIterations,
 		Model:         providerCfg.Model,
 		MaxTokens:     memCfg.Working.MaxTokens,
 		MemoryEnabled: memManager != nil,
 	}
-	ag := agent.New(llm, cfg.ToolRegistry, agentCfg, memManager)
+	ag := agent.New(llm, cfg.ToolRegistry, agentCfg, memManager, classifier)
 
 	// Determine user and project directories.
 	homeDir, err := os.UserHomeDir()
@@ -223,16 +233,6 @@ func (rt *Runtime) RunUserInput(ctx context.Context, input string) <-chan agent.
 
 	// Set the built prompt on the agent.
 	rt.agent.SetSystemPrompt(builtPrompt)
-
-	// Store user input in memory if available.
-	if rt.memory != nil {
-		go func() {
-			rt.memory.Store(ctx, memory.Interaction{
-				UserMsg:  input,
-				Metadata: map[string]any{"timestamp": time.Now()},
-			})
-		}()
-	}
 
 	// Start the agent run.
 	agentCh := rt.agent.Run(ctx, input)

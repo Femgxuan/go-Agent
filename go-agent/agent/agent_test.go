@@ -73,7 +73,7 @@ func TestAgentDirectAnswer(t *testing.T) {
 		},
 	}
 	reg := makeRegistry(t, nil)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil)
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "hi")
@@ -113,7 +113,7 @@ func TestAgentToolCallLoop(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "search result here"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil)
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "search for something")
@@ -186,7 +186,7 @@ func TestAgentMaxIterations(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "result"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 3}, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 3}, nil, nil)
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "loop forever")
@@ -228,7 +228,7 @@ func TestAgentContextCancel(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "result"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 100}, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 100}, nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -258,7 +258,7 @@ func TestAgentMultiTurn(t *testing.T) {
 		},
 	}
 	reg := makeRegistry(t, nil)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil)
 
 	ctx := context.Background()
 
@@ -289,4 +289,43 @@ func TestAgentMultiTurn(t *testing.T) {
 	}
 
 	_ = time.Second // avoid import error
+}
+
+func TestExtractMemoryFact_ExplicitRemember(t *testing.T) {
+	tests := []struct {
+		input  string
+		wantOK bool
+	}{
+		{"记住我喜欢Go语言", true},
+		{"Remember I like Python", true},
+		{"你好", false},
+		{"今天天气怎么样", false},
+	}
+	for _, tt := range tests {
+		_, ok := extractMemoryFact(tt.input)
+		if ok != tt.wantOK {
+			t.Errorf("extractMemoryFact(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
+		}
+	}
+}
+
+func TestExtractMemoryFact_Preference(t *testing.T) {
+	tests := []struct {
+		input  string
+		wantOK bool
+	}{
+		{"我喜欢Go语言", true},
+		{"我不喜欢Java", true},
+		{"我想要学习Rust", true},
+		{"I like Go", true},
+		{"my favorite language is Python", true},
+		{"你好", false},
+		{"今天天气怎么样", false},
+	}
+	for _, tt := range tests {
+		_, ok := extractMemoryFact(tt.input)
+		if ok != tt.wantOK {
+			t.Errorf("extractMemoryFact(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
+		}
+	}
 }

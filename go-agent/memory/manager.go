@@ -16,6 +16,10 @@ type Manager interface {
 	// Store saves a single interaction (user input + agent output).
 	Store(ctx context.Context, interaction Interaction) error
 
+	// AddToWorkingMemory adds a message to working memory without requiring an active session.
+	// Used to make the current user message immediately available to buildMessages().
+	AddToWorkingMemory(msg Message) error
+
 	// Memorize explicitly remembers a fact (called by user or agent).
 	Memorize(ctx context.Context, fact Fact) error
 
@@ -56,10 +60,48 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 	// Create meta memory.
 	meta := NewFileMetaMemory(cfg.Meta.StorageDir)
 
+	// Try to create long-term memory (pgvector). Degrade gracefully if unavailable.
+	var longTerm LongTermMemory
+	if cfg.LongTerm.PostgresURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		pool, err := NewPgPool(ctx, cfg.LongTerm.PostgresURL)
+		if err != nil {
+			slog.Warn("PostgreSQL unavailable, long-term memory disabled", "error", err, "url", cfg.LongTerm.PostgresURL)
+		} else {
+			// Create embedder based on provider.
+			var embedder Embedder
+			switch cfg.LongTerm.Embedder.Provider {
+			case "ollama":
+				baseURL := cfg.LongTerm.Embedder.BaseURL
+				if baseURL == "" {
+					baseURL = "http://localhost:11434"
+				}
+				embedder = NewOllamaEmbedder(baseURL, cfg.LongTerm.Embedder.Model)
+				slog.Info("using Ollama embedder", "baseURL", baseURL, "model", cfg.LongTerm.Embedder.Model)
+			case "hash":
+				embedder = NewHashEmbedder(1536)
+				slog.Info("using hash embedder (no API needed)")
+			default: // "openai"
+				if cfg.LongTerm.Embedder.APIKey == "" {
+					slog.Warn("OpenAI API key not set, falling back to hash embedder")
+					embedder = NewHashEmbedder(1536)
+				} else {
+					embedder = NewOpenAIEmbedder(cfg.LongTerm.Embedder.APIKey, cfg.LongTerm.Embedder.Model)
+					slog.Info("using OpenAI embedder", "model", cfg.LongTerm.Embedder.Model)
+				}
+			}
+			longTerm = NewPgLongTermMemory(pool, embedder)
+			slog.Info("long-term memory enabled", "provider", cfg.LongTerm.Embedder.Provider, "postgres", cfg.LongTerm.PostgresURL)
+		}
+	}
+
 	return &DefaultManager{
 		config:    cfg,
 		working:   working,
 		shortTerm: shortTerm,
+		longTerm:  longTerm,
 		meta:      meta,
 	}, nil
 }
@@ -94,7 +136,7 @@ func (m *DefaultManager) Retrieve(ctx context.Context, query string, opts Retrie
 	return result, nil
 }
 
-// Store saves a single interaction.
+// Store saves a single interaction to both short-term memory and working memory.
 func (m *DefaultManager) Store(ctx context.Context, interaction Interaction) error {
 	m.mu.RLock()
 	sid := m.currentSession
@@ -105,21 +147,31 @@ func (m *DefaultManager) Store(ctx context.Context, interaction Interaction) err
 	}
 
 	interaction.SessionID = sid
+
+	// Save to short-term memory for persistence.
 	return m.shortTerm.Save(ctx, sid, interaction)
+}
+
+// AddToWorkingMemory adds a message to working memory without requiring an active session.
+func (m *DefaultManager) AddToWorkingMemory(msg Message) error {
+	return m.working.Add(msg)
 }
 
 // Memorize explicitly remembers a fact.
 func (m *DefaultManager) Memorize(ctx context.Context, fact Fact) error {
-	// Store key fact in working memory.
-	m.working.Remember(fact.Key, fact.Content)
+	// Use category as key prefix for working memory.
+	key := string(fact.Category)
+	if fact.Key != "" {
+		key = fact.Key
+	}
+	m.working.Remember(key, fact.Content)
 
-	// If long-term memory is available, store there too.
 	if m.longTerm != nil {
 		if err := m.longTerm.Store(ctx, fact); err != nil {
-			slog.Warn("failed to store fact in long-term memory", "error", err)
+			slog.Debug("failed to store fact in long-term memory", "error", err, "key", fact.Key)
+			return fmt.Errorf("long-term storage failed: %w", err)
 		}
 	}
-
 	return nil
 }
 
