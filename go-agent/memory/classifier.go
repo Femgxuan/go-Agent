@@ -24,24 +24,60 @@ func NewClassifier(llm client.LLMClient) *Classifier {
 
 const classifyPrompt = `You are a memory classifier. Given a user message and an assistant reply, determine if the message contains information worth saving to a markdown file.
 
-Categories:
-- soul: Agent personality, communication style, behavior boundaries, values
-  Examples: "be concise", "don't use emojis", "ask before destructive ops"
-  中文示例: "记住说话要简洁", "不要用表情符号", "破坏性操作前要确认"
-- memory: Project context, tech stack, environment, work conventions
-  Examples: "we use PostgreSQL", "code style is Google", "repo at ~/code/proj"
-  中文示例: "我们的项目用 PostgreSQL", "代码风格用 Google 规范", "仓库在 ~/code/proj"
-- user: User personal facts, preferences, habits, constraints
-  Examples: "my name is Alice", "I prefer Go", "I have a toddler"
-  中文示例: "我叫张三", "我喜欢用 Go", "我有个小孩"
-- none: Trivial info, temporary tasks, easily re-rediscoverable facts
+## Categories
 
-CRITICAL DISTINCTION:
-- "我们/我们的" + project/tech → memory (project fact)
-- "我/我的" + personal identity/life → user (personal fact)
-- "我/我的" + coding preference that affects project → memory (work convention)
+### soul — About the AGENT itself
+How the agent should behave, talk, and make decisions. Personality, tone, values, boundaries.
+Ask yourself: "Should this shape how I act in ALL future conversations?"
 
-Rules:
+Examples:
+- "be concise, no fluff"
+- "don't use emojis"
+- "always ask before running destructive commands"
+- "回答要简洁，不要废话"
+
+### memory — About the WORK and PROJECT
+Facts about the project, codebase, tech stack, infrastructure, team conventions, work environment.
+Ask yourself: "Is this about the work I'm helping with, not about the person?"
+
+Examples:
+- "the project uses PostgreSQL and Redis"
+- "we deploy to AWS, region us-east-1"
+- "code style follows Google Go conventions"
+- "the repo is at ~/code/brightcart"
+- "we use Stripe for payments"
+- "项目用的是 PostgreSQL"
+- "部署在阿里云华东区"
+- "代码风格用 Google 规范"
+
+### user — About the PERSON
+Facts about the user's identity, life, personal preferences, habits, constraints.
+Ask yourself: "Is this about who the user is as a person?"
+
+Examples:
+- "my name is Alice"
+- "I live in Shanghai"
+- "I have a 2-year-old kid"
+- "I prefer dark mode"
+- "I'm left-handed"
+- "我叫张三"
+- "我在上海工作"
+- "我有个两岁的孩子"
+
+### none — Not worth storing
+Greetings, questions, tool requests, temporary tasks, easily re-derivable facts.
+
+## Decision Guide
+
+When the information could fit multiple categories, ask:
+1. Does it describe the PROJECT or WORK context? → memory
+2. Does it describe the PERSON? → user
+3. Does it describe the AGENT's behavior? → soul
+4. Is it trivial or temporary? → none
+
+When in doubt between memory and user: if removing this fact would make the agent worse at helping with work, it's memory. If it would just make the agent less personalized, it's user.
+
+## Rules
 - DO NOT store: greetings, questions, tool requests, temporary info
 - DO store: stable facts that remain true across sessions
 - Curate: distill to 1-2 sentences, add § prefix
