@@ -2,10 +2,12 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/fengxuan/go-agent/agent"
@@ -186,61 +188,9 @@ func New(cfg Config) (*Runtime, error) {
 // RunUserInput is the main request flow. It builds the system prompt, sets it on the
 // agent, calls agent.Run, and returns a wrapped channel that prepends an EventPromptTrace event.
 func (rt *Runtime) RunUserInput(ctx context.Context, input string) <-chan agent.AgentEvent {
-	// Build the prompt.
-	pb := prompt.NewBuilder()
-
-	// 1. Base system prompt.
-	pb.AddSource(prompt.Source{
-		Name:    "base",
-		Type:    prompt.TypeSystem,
-		Content: baseSystemPrompt,
-	})
-
-	// 2. Load and add rules.
-	ruleSets := rt.rulesLoader.Load()
-	for _, rs := range ruleSets {
-		pb.AddSource(prompt.Source{
-			Name:    rs.Path,
-			Type:    prompt.TypeRules,
-			Content: rs.Content,
-		})
-	}
-
-	// 3. Match skills: auto-match on input + any explicitly activated skills.
-	rt.mu.Lock()
-	activeSkillNames := make([]string, len(rt.activeSkills))
-	copy(activeSkillNames, rt.activeSkills)
-	rt.activeSkills = nil // clear after capture
-	rt.mu.Unlock()
-
-	// Auto-match skills based on input.
-	matchedSkills := rt.skillIndex.Match(input)
-	skillsSeen := make(map[string]bool)
-	for _, s := range matchedSkills {
-		skillsSeen[s.Name] = true
-		pb.AddSource(prompt.Source{
-			Name:    s.Name,
-			Type:    prompt.TypeSkill,
-			Content: s.Body,
-		})
-	}
-
-	// Add explicitly activated skills (if not already included).
-	for _, name := range activeSkillNames {
-		if skillsSeen[name] {
-			continue
-		}
-		results := rt.skillIndex.MatchByName(name)
-		for _, s := range results {
-			pb.AddSource(prompt.Source{
-				Name:    s.Name,
-				Type:    prompt.TypeSkill,
-				Content: s.Body,
-			})
-		}
-	}
-
-	builtPrompt, trace := pb.Build()
+	// Build the prompt with HermesBuilder (reads SOUL.md, MEMORY.md, USER.md).
+	builtPrompt := rt.buildHermesPrompt()
+	trace := &prompt.Trace{} // minimal trace for compatibility
 
 	// Store the trace.
 	rt.mu.Lock()
@@ -476,4 +426,51 @@ func (rt *Runtime) UpdateSkill(name string, req commands.CreateSkillRequest) (co
 		Path:    skill.BasePath,
 		Message: fmt.Sprintf("Skill '%s' updated", skill.Name),
 	}, nil
+}
+
+// readFileOrDefault reads a file and returns its content, or the default value if the file doesn't exist.
+func readFileOrDefault(path, defaultVal string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return defaultVal
+	}
+	return string(data)
+}
+
+// buildHermesPrompt reads SOUL.md, MEMORY.md, USER.md from disk and builds the system prompt.
+func (rt *Runtime) buildHermesPrompt() string {
+	memDir := rt.userDir
+	soulContent := readFileOrDefault(filepath.Join(memDir, "SOUL.md"), "")
+	memoryContent := readFileOrDefault(filepath.Join(memDir, "MEMORY.md"), "")
+	userContent := readFileOrDefault(filepath.Join(memDir, "USER.md"), "")
+
+	hb := prompt.NewHermesBuilder()
+	hb.SetSoul(soulContent)
+	hb.SetMemory(memoryContent, userContent)
+
+	// Add platform hints
+	hb.SetPlatform(fmt.Sprintf("%s/%s", rt.provider, rt.model))
+
+	// Add skills index
+	skills := rt.skillIndex.List()
+	if len(skills) > 0 {
+		var sb strings.Builder
+		sb.WriteString("## Available Skills\n")
+		for _, s := range skills {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", s.Name, s.Description))
+		}
+		hb.SetSkillsIndex(sb.String())
+	}
+
+	// Add tool rules
+	hb.SetToolRules(baseSystemPrompt)
+
+	// Add tool schemas
+	schemas := rt.toolRegistry.ToolSchemas()
+	if len(schemas) > 0 {
+		schemaJSON, _ := json.Marshal(schemas)
+		hb.SetToolSchemas(string(schemaJSON))
+	}
+
+	return hb.Build()
 }
