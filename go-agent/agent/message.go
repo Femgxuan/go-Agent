@@ -10,6 +10,8 @@ const (
 	EventError
 	EventDelta
 	EventPromptTrace
+	EventCompressing // Context compression started
+	EventCompressed  // Context compression completed
 )
 
 func (e EventType) String() string {
@@ -28,6 +30,10 @@ func (e EventType) String() string {
 		return "Delta"
 	case EventPromptTrace:
 		return "PromptTrace"
+	case EventCompressing:
+		return "Compressing"
+	case EventCompressed:
+		return "Compressed"
 	default:
 		return "Unknown"
 	}

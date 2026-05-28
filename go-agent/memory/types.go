@@ -92,3 +92,70 @@ type ForgetFilter struct {
 	Before     *time.Time // forget items before this time
 	KeyPattern *string    // forget by key pattern match
 }
+
+// --- Episodic Memory Types ---
+
+// Session represents a conversation session for episodic memory.
+type Session struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+	Episodes  []Episode `json:"episodes"`
+}
+
+// Episode represents a single message within a session.
+type Episode struct {
+	ID         string    `json:"id"`
+	SessionID  string    `json:"session_id"`
+	Role       string    `json:"role"`
+	Content    string    `json:"content"`
+	CreatedAt  time.Time `json:"created_at"`
+	TokenCount int       `json:"token_count"`
+}
+
+// SessionSummary is a lightweight session listing entry.
+type SessionSummary struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	Source    string    `json:"source"`
+	CreatedAt time.Time `json:"created_at"`
+	MsgCount  int       `json:"msg_count"`
+}
+
+// --- Skill Memory Types ---
+
+// SkillAction represents a skill management action.
+type SkillAction string
+
+const (
+	SkillCreate SkillAction = "create"
+	SkillPatch  SkillAction = "patch"
+	SkillEdit   SkillAction = "edit"
+	SkillDelete SkillAction = "delete"
+)
+
+// SkillIndex is a lightweight skill entry for Level-0 prompt injection.
+type SkillIndex struct {
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Version     string   `yaml:"version"`
+	Tags        []string `yaml:"tags"`
+}
+
+// --- Frozen Snapshot ---
+
+// FrozenSnapshot holds the immutable memory/user content injected into the system prompt.
+type FrozenSnapshot struct {
+	Memory string // MEMORY.md content (~2200 chars max)
+	User   string // USER.md content (~1375 chars max)
+}
+
+// --- Security ---
+
+// SecurityWarning represents a detected security issue in memory content.
+type SecurityWarning struct {
+	Type    string // "injection", "exfiltration", "persistence", "unicode"
+	Detail  string
+	LineNum int
+}

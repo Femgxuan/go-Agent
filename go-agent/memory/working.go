@@ -18,15 +18,31 @@ type WorkingMemory interface {
 
 	// TokenCount计算当前工作记忆的Token数
 	TokenCount() int
+
+	// NeedsCompression returns true if token usage exceeds the given threshold.
+	NeedsCompression(threshold float64) bool
+
+	// GetCompressedSummary returns the compressed summary from previous compression.
+	GetCompressedSummary() string
+
+	// SetCompressedSummary sets the compressed summary after compression.
+	SetCompressedSummary(summary string)
+
+	// GetMessages returns all messages (for compression).
+	GetMessages() []Message
+
+	// ReplaceMessages replaces all messages (after compression).
+	ReplaceMessages(msgs []Message)
 }
 
 // WorkingMemoryImpl实现WorkingMemory接口
 type WorkingMemoryImpl struct {
-	mu        sync.RWMutex
-	messages  []Message
-	keyFacts  map[string]string
-	tokenizer Tokenizer
-	maxTokens int
+	mu                sync.RWMutex
+	messages          []Message
+	keyFacts          map[string]string
+	tokenizer         Tokenizer
+	maxTokens         int
+	compressedSummary string
 }
 
 // NewWorkingMemory创建一个新的WorkingMemory
@@ -101,4 +117,52 @@ func (w *WorkingMemoryImpl) TokenCount() int {
 		count += w.tokenizer.Count(msg.Content)
 	}
 	return count
+}
+
+// NeedsCompression returns true if token usage exceeds the given threshold.
+func (w *WorkingMemoryImpl) NeedsCompression(threshold float64) bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+
+	if w.maxTokens <= 0 || len(w.messages) == 0 {
+		return false
+	}
+
+	totalTokens := 0
+	for _, msg := range w.messages {
+		totalTokens += w.tokenizer.Count(msg.Content)
+	}
+
+	usage := float64(totalTokens) / float64(w.maxTokens)
+	return usage >= threshold
+}
+
+// GetCompressedSummary returns the compressed summary from previous compression.
+func (w *WorkingMemoryImpl) GetCompressedSummary() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.compressedSummary
+}
+
+// SetCompressedSummary sets the compressed summary after compression.
+func (w *WorkingMemoryImpl) SetCompressedSummary(summary string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.compressedSummary = summary
+}
+
+// GetMessages returns all messages (for compression).
+func (w *WorkingMemoryImpl) GetMessages() []Message {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	result := make([]Message, len(w.messages))
+	copy(result, w.messages)
+	return result
+}
+
+// ReplaceMessages replaces all messages (after compression).
+func (w *WorkingMemoryImpl) ReplaceMessages(msgs []Message) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.messages = msgs
 }

@@ -13,11 +13,13 @@ func TestManager_StartSession(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &Config{
 		Working: struct {
-			MaxTokens int    `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
-			Tokenizer string `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"`
+			MaxTokens            int     `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
+			Tokenizer            string  `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"`
+			CompressionThreshold float64 `yaml:"compression_threshold" env:"MEMORY_COMPRESSION_THRESHOLD"`
 		}{
-			MaxTokens: 100,
-			Tokenizer: "simple",
+			MaxTokens:            100,
+			Tokenizer:            "simple",
+			CompressionThreshold: 0.85,
 		},
 		ShortTerm: struct {
 			StorageDir  string `yaml:"storage_dir" env:"MEMORY_SHORTTERM_DIR"`
@@ -40,11 +42,13 @@ func TestManager_Store(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &Config{
 		Working: struct {
-			MaxTokens int    `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
-			Tokenizer string `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"`
+			MaxTokens            int     `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
+			Tokenizer            string  `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"`
+			CompressionThreshold float64 `yaml:"compression_threshold" env:"MEMORY_COMPRESSION_THRESHOLD"`
 		}{
-			MaxTokens: 100,
-			Tokenizer: "simple",
+			MaxTokens:            100,
+			Tokenizer:            "simple",
+			CompressionThreshold: 0.85,
 		},
 		ShortTerm: struct {
 			StorageDir  string `yaml:"storage_dir" env:"MEMORY_SHORTTERM_DIR"`
@@ -75,11 +79,13 @@ func TestManager_Retrieve(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &Config{
 		Working: struct {
-			MaxTokens int    `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
-			Tokenizer string `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"`
+			MaxTokens            int     `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
+			Tokenizer            string  `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"`
+			CompressionThreshold float64 `yaml:"compression_threshold" env:"MEMORY_COMPRESSION_THRESHOLD"`
 		}{
-			MaxTokens: 100,
-			Tokenizer: "simple",
+			MaxTokens:            100,
+			Tokenizer:            "simple",
+			CompressionThreshold: 0.85,
 		},
 		ShortTerm: struct {
 			StorageDir  string `yaml:"storage_dir" env:"MEMORY_SHORTTERM_DIR"`
@@ -109,11 +115,13 @@ func TestManager_Memorize(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &Config{
 		Working: struct {
-			MaxTokens int    `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
-			Tokenizer string `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"`
+			MaxTokens            int     `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
+			Tokenizer            string  `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"`
+			CompressionThreshold float64 `yaml:"compression_threshold" env:"MEMORY_COMPRESSION_THRESHOLD"`
 		}{
-			MaxTokens: 100,
-			Tokenizer: "simple",
+			MaxTokens:            100,
+			Tokenizer:            "simple",
+			CompressionThreshold: 0.85,
 		},
 		ShortTerm: struct {
 			StorageDir  string `yaml:"storage_dir" env:"MEMORY_SHORTTERM_DIR"`

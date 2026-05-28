@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -35,6 +36,15 @@ func main() {
 
 	// 3. Apply env overrides
 	config.ApplyEnvOverrides(cfg)
+
+	// 3.5. Configure slog to write to file instead of stderr
+	if home, err := os.UserHomeDir(); err == nil {
+		logDir := filepath.Join(home, ".go-agent")
+		os.MkdirAll(logDir, 0o755)
+		if logFile, err := os.OpenFile(filepath.Join(logDir, "debug.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644); err == nil {
+			slog.SetDefault(slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo})))
+		}
+	}
 
 	// 4. Build tool registry
 	registry := buildRegistry(cfg)

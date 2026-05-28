@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Manager is the unified entry point for the memory system, coordinating four layers of memory.
@@ -34,6 +36,18 @@ type Manager interface {
 
 	// Forget selectively forgets memories.
 	Forget(ctx context.Context, filter ForgetFilter) error
+
+	// Episodic returns the episodic memory store (may be nil if disabled).
+	Episodic() EpisodicStore
+
+	// Semantic returns the semantic memory store.
+	Semantic() SemanticStore
+
+	// Skills returns the skill store (may be nil if not configured).
+	Skills() SkillStore
+
+	// Compressor returns the context compressor (may be nil if not configured).
+	Compressor() *ContextCompressor
 }
 
 // DefaultManager implements the Manager interface.
@@ -46,12 +60,24 @@ type DefaultManager struct {
 	meta           MetaMemory
 	currentSession SessionID
 	sessionCounter int
+	episodic       EpisodicStore
+	skillStore     SkillStore
+	compressor     *ContextCompressor
 }
 
 // NewManager creates a new DefaultManager.
 func NewManager(cfg *Config) (*DefaultManager, error) {
+	// Create tokenizer (prefer tiktoken, fallback to simple).
+	var tokenizer Tokenizer
+	tk, err := NewTiktokenTokenizer("gpt-4")
+	if err != nil {
+		slog.Warn("tiktoken unavailable, using simple tokenizer", "error", err)
+		tokenizer = &SimpleTokenizer{}
+	} else {
+		tokenizer = tk
+	}
+
 	// Create working memory.
-	tokenizer := &SimpleTokenizer{}
 	working := NewWorkingMemory(cfg.Working.MaxTokens, tokenizer)
 
 	// Create short-term memory.
@@ -62,11 +88,13 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 
 	// Try to create long-term memory (pgvector). Degrade gracefully if unavailable.
 	var longTerm LongTermMemory
+	var pool *pgxpool.Pool
 	if cfg.LongTerm.PostgresURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		pool, err := NewPgPool(ctx, cfg.LongTerm.PostgresURL)
+		var err error
+		pool, err = NewPgPool(ctx, cfg.LongTerm.PostgresURL)
 		if err != nil {
 			slog.Warn("PostgreSQL unavailable, long-term memory disabled", "error", err, "url", cfg.LongTerm.PostgresURL)
 		} else {
@@ -97,12 +125,32 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 		}
 	}
 
+	// Create episodic store.
+	var episodic EpisodicStore
+	if cfg.Episodic.Enabled && pool != nil {
+		episodic = NewPgEpisodicStore(pool, nil, tokenizer)
+		slog.Info("episodic memory enabled")
+	}
+
+	// Create skill store.
+	var skillStore SkillStore
+	if cfg.Skills.Dir != "" {
+		skillStore = NewFileSkillStore(cfg.Skills.Dir, cfg.Skills.MaxIndex)
+		slog.Info("skill store enabled", "dir", cfg.Skills.Dir)
+	}
+
+	// Create context compressor.
+	compressor := NewContextCompressor(working, nil, tokenizer, cfg.Working.MaxTokens, cfg.Working.CompressionThreshold)
+
 	return &DefaultManager{
-		config:    cfg,
-		working:   working,
-		shortTerm: shortTerm,
-		longTerm:  longTerm,
-		meta:      meta,
+		config:     cfg,
+		working:    working,
+		shortTerm:  shortTerm,
+		longTerm:   longTerm,
+		meta:       meta,
+		episodic:   episodic,
+		skillStore: skillStore,
+		compressor: compressor,
 	}, nil
 }
 
@@ -226,4 +274,27 @@ func (m *DefaultManager) Compact(ctx context.Context) error {
 func (m *DefaultManager) Forget(ctx context.Context, filter ForgetFilter) error {
 	// TODO: implement forget logic.
 	return nil
+}
+
+// Episodic returns the episodic memory store.
+func (m *DefaultManager) Episodic() EpisodicStore {
+	return m.episodic
+}
+
+// Semantic returns the semantic memory store.
+func (m *DefaultManager) Semantic() SemanticStore {
+	if m.longTerm != nil {
+		return m.longTerm.(SemanticStore)
+	}
+	return nil
+}
+
+// Skills returns the skill store.
+func (m *DefaultManager) Skills() SkillStore {
+	return m.skillStore
+}
+
+// Compressor returns the context compressor.
+func (m *DefaultManager) Compressor() *ContextCompressor {
+	return m.compressor
 }

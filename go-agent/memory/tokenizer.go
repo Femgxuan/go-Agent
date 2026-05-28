@@ -1,6 +1,11 @@
 package memory
 
-import "unicode"
+import (
+	"fmt"
+	"unicode"
+
+	tiktoken "github.com/pkoukk/tiktoken-go"
+)
 
 // Tokenizer是Token计数的抽象接口
 type Tokenizer interface {
@@ -38,4 +43,31 @@ func (t *SimpleTokenizer) Count(text string) int {
 	}
 
 	return tokens
+}
+
+// TiktokenTokenizer uses tiktoken for accurate token counting.
+type TiktokenTokenizer struct {
+	enc   *tiktoken.Tiktoken
+	model string
+}
+
+// NewTiktokenTokenizer creates a tokenizer for the given model.
+// Falls back to cl100k_base encoding if model-specific encoding is unavailable.
+func NewTiktokenTokenizer(model string) (*TiktokenTokenizer, error) {
+	enc, err := tiktoken.EncodingForModel(model)
+	if err != nil {
+		enc, err = tiktoken.GetEncoding("cl100k_base")
+		if err != nil {
+			return nil, fmt.Errorf("tiktoken encoding: %w", err)
+		}
+	}
+	return &TiktokenTokenizer{enc: enc, model: model}, nil
+}
+
+// Count returns the number of tokens in text.
+func (t *TiktokenTokenizer) Count(text string) int {
+	if text == "" {
+		return 0
+	}
+	return len(t.enc.Encode(text, nil, nil))
 }

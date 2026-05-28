@@ -421,3 +421,40 @@ func toFloat32(src []float64) []float32 {
 	}
 	return dst
 }
+
+// Recall retrieves facts relevant to the query using hybrid FTS + vector search.
+// This is the SemanticStore interface method (semantic alias for Search).
+func (m *PgLongTermMemory) Recall(ctx context.Context, query string, topK int) ([]Fact, error) {
+	if topK <= 0 {
+		topK = 10
+	}
+	return m.Search(ctx, query, topK, 0)
+}
+
+// Remember stores a fact. SemanticStore interface method (semantic alias for Store).
+func (m *PgLongTermMemory) Remember(ctx context.Context, fact Fact) error {
+	return m.Store(ctx, fact)
+}
+
+// ForgetByFilter deletes facts matching the filter criteria.
+func (m *PgLongTermMemory) ForgetByFilter(ctx context.Context, filter ForgetFilter) error {
+	if filter.SessionID != nil {
+		_, err := m.pool.Exec(ctx, `DELETE FROM facts WHERE source = $1`, string(*filter.SessionID))
+		if err != nil {
+			return fmt.Errorf("forget by session: %w", err)
+		}
+	}
+	if filter.Before != nil {
+		_, err := m.pool.Exec(ctx, `DELETE FROM facts WHERE created_at < $1`, *filter.Before)
+		if err != nil {
+			return fmt.Errorf("forget by time: %w", err)
+		}
+	}
+	if filter.KeyPattern != nil {
+		_, err := m.pool.Exec(ctx, `DELETE FROM facts WHERE key LIKE $1`, "%"+*filter.KeyPattern+"%")
+		if err != nil {
+			return fmt.Errorf("forget by pattern: %w", err)
+		}
+	}
+	return nil
+}

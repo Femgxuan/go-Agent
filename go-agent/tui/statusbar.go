@@ -15,6 +15,7 @@ const (
 	StateReady AgentState = iota
 	StateThinking
 	StateExecuting
+	StateCompressing
 )
 
 // String returns the display string for an AgentState.
@@ -26,6 +27,8 @@ func (s AgentState) String() string {
 		return "Thinking"
 	case StateExecuting:
 		return "Executing"
+	case StateCompressing:
+		return "Compressing"
 	default:
 		return "Unknown"
 	}
@@ -40,6 +43,8 @@ func stateIcon(s AgentState) string {
 		return "◐ "
 	case StateExecuting:
 		return "⚡ "
+	case StateCompressing:
+		return "🗜 "
 	default:
 		return "● "
 	}
@@ -54,6 +59,8 @@ func stateStyle(s AgentState) lipgloss.Style {
 		return statusThinkingStyle
 	case StateExecuting:
 		return statusExecutingStyle
+	case StateCompressing:
+		return statusThinkingStyle // Reuse thinking style for compressing
 	default:
 		return statusReadyStyle
 	}

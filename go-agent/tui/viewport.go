@@ -17,6 +17,7 @@ const (
 	PanelObservation
 	PanelAnswer
 	PanelError
+	PanelCompressed
 )
 
 // Panel represents a single message panel in the viewport.
@@ -39,8 +40,16 @@ func NewMessageView() *MessageView {
 	return &MessageView{globalCollapsed: true}
 }
 
-// AddPanel appends a new panel.
+// AddPanel appends a new panel. When a new user message arrives,
+// all previous collapsible panels are auto-collapsed to reduce clutter.
 func (m *MessageView) AddPanel(p Panel) {
+	if p.Type == PanelUser {
+		for i := range m.panels {
+			if m.panels[i].Collapsible {
+				m.panels[i].Collapsed = true
+			}
+		}
+	}
 	m.panels = append(m.panels, p)
 }
 
@@ -102,10 +111,19 @@ func (m *MessageView) Render(width int) string {
 		return ""
 	}
 	var sb strings.Builder
-	for _, p := range m.panels {
+	for i, p := range m.panels {
+		if p.Type == PanelUser && i > 0 {
+			sb.WriteString(renderDivider(width))
+		}
 		sb.WriteString(renderPanel(p, width, m.globalCollapsed))
 	}
 	return sb.String()
+}
+
+// renderDivider renders a prominent visual separator between conversation rounds.
+func renderDivider(width int) string {
+	line := strings.Repeat("─", max(0, width-2))
+	return "\n" + dimStyle.Render("┌"+line+"┐") + "\n"
 }
 
 // renderPanel renders a single panel.
@@ -158,6 +176,11 @@ func renderPanel(p Panel, width int, globalCollapsed bool) string {
 
 	case PanelError:
 		return "\n  " + errorStyle.Render("Error: "+p.Content) + "\n"
+
+	case PanelCompressed:
+		headerText := fmt.Sprintf("🗜 Context compressed (%d chars saved) ", len(p.Content))
+		header := dimStyle.Render(headerText) + dimStyle.Render(strings.Repeat("─", max(0, width-lipgloss.Width(headerText)-2)))
+		return "\n" + header + "\n"
 
 	default:
 		return ""

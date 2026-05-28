@@ -11,8 +11,9 @@ import (
 type Config struct {
 	// Working memory configuration
 	Working struct {
-		MaxTokens int    `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
-		Tokenizer string `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"` // "simple" | "tiktoken"
+		MaxTokens            int     `yaml:"max_tokens" env:"MEMORY_WORKING_MAX_TOKENS"`
+		Tokenizer            string  `yaml:"tokenizer" env:"MEMORY_WORKING_TOKENIZER"` // "simple" | "tiktoken"
+		CompressionThreshold float64 `yaml:"compression_threshold" env:"MEMORY_COMPRESSION_THRESHOLD"`
 	} `yaml:"working"`
 
 	// Short-term memory configuration
@@ -33,6 +34,25 @@ type Config struct {
 		HalfLife time.Duration `yaml:"half_life" env:"MEMORY_LONGTERM_HALF_LIFE"`
 	} `yaml:"long_term"`
 
+	// Episodic memory configuration
+	Episodic struct {
+		Enabled bool `yaml:"enabled" env:"MEMORY_EPISODIC_ENABLED"`
+	} `yaml:"episodic"`
+
+	// Semantic memory configuration
+	Semantic struct {
+		UseVector bool `yaml:"use_vector" env:"MEMORY_SEMANTIC_USE_VECTOR"`
+	} `yaml:"semantic"`
+
+	// Skills configuration
+	Skills struct {
+		Dir      string `yaml:"dir" env:"MEMORY_SKILLS_DIR"`
+		MaxIndex int    `yaml:"max_index" env:"MEMORY_SKILLS_MAX_INDEX"`
+	} `yaml:"skills"`
+
+	// Memory files directory (SOUL.md, MEMORY.md, USER.md)
+	MemoryDir string `yaml:"memory_dir" env:"MEMORY_DIR"`
+
 	// Meta-memory configuration
 	Meta struct {
 		StorageDir string `yaml:"storage_dir" env:"MEMORY_META_DIR"`
@@ -52,6 +72,7 @@ func DefaultConfig() *Config {
 	// Working memory defaults
 	cfg.Working.MaxTokens = 8192
 	cfg.Working.Tokenizer = "simple"
+	cfg.Working.CompressionThreshold = 0.85
 
 	// Short-term memory defaults
 	home, _ := os.UserHomeDir()
@@ -63,6 +84,19 @@ func DefaultConfig() *Config {
 	cfg.LongTerm.Embedder.Provider = "openai"
 	cfg.LongTerm.Embedder.Model = "text-embedding-3-small"
 	cfg.LongTerm.HalfLife = 30 * 24 * time.Hour // 30 days
+
+	// Episodic memory defaults
+	cfg.Episodic.Enabled = true
+
+	// Semantic memory defaults
+	cfg.Semantic.UseVector = false
+
+	// Skills defaults
+	cfg.Skills.Dir = filepath.Join(home, ".go-agent", "skills")
+	cfg.Skills.MaxIndex = 20
+
+	// Memory files directory
+	cfg.MemoryDir = filepath.Join(home, ".go-agent")
 
 	// Meta-memory defaults
 	cfg.Meta.StorageDir = filepath.Join(home, ".go-agent", "memory", "reflections")
@@ -79,6 +113,11 @@ func ApplyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("MEMORY_WORKING_MAX_TOKENS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.Working.MaxTokens = n
+		}
+	}
+	if v := os.Getenv("MEMORY_COMPRESSION_THRESHOLD"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.Working.CompressionThreshold = f
 		}
 	}
 	if v := os.Getenv("MEMORY_SHORTTERM_DIR"); v != "" {
@@ -98,5 +137,8 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("MEMORY_EMBEDDER_BASE_URL"); v != "" {
 		cfg.LongTerm.Embedder.BaseURL = v
+	}
+	if v := os.Getenv("MEMORY_DIR"); v != "" {
+		cfg.MemoryDir = v
 	}
 }
