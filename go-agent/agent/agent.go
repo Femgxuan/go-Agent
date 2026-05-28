@@ -187,6 +187,26 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 			}); err != nil {
 				slog.Warn("failed to store interaction", "error", err)
 			}
+
+			// Save to episodic memory (PostgreSQL) for long-term search.
+			if episodic := a.memory.Episodic(); episodic != nil {
+				now := time.Now()
+				session := memory.Session{
+					ID:        fmt.Sprintf("session-%d", now.UnixMilli()),
+					Title:     truncate(input, 80),
+					Source:    "agent",
+					CreatedAt: now,
+					Episodes: []memory.Episode{
+						{ID: fmt.Sprintf("ep-%d-1", now.UnixMilli()), Role: "user", Content: input, CreatedAt: now},
+						{ID: fmt.Sprintf("ep-%d-2", now.UnixMilli()), Role: "assistant", Content: lastAssistant, CreatedAt: now},
+					},
+				}
+				if err := episodic.SaveSession(storeCtx, session); err != nil {
+					slog.Warn("[episodic] failed to save session", "error", err)
+				} else {
+					slog.Info("[episodic] session saved", "session_id", session.ID)
+				}
+			}
 		}()
 	}
 
@@ -617,4 +637,11 @@ func appendToMarkdown(memoryDir, target, content string) error {
 
 	slog.Info("[memory] wrote to markdown", "target", target, "content", content)
 	return nil
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
