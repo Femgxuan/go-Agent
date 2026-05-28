@@ -53,6 +53,9 @@ type Config struct {
 	// Memory files directory (SOUL.md, MEMORY.md, USER.md)
 	MemoryDir string `yaml:"memory_dir" env:"MEMORY_DIR"`
 
+	// Auto-write control for markdown memory
+	AutoWrite bool `yaml:"auto_write" env:"MEMORY_AUTO_WRITE"`
+
 	// Meta-memory configuration
 	Meta struct {
 		StorageDir string `yaml:"storage_dir" env:"MEMORY_META_DIR"`
@@ -140,5 +143,8 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("MEMORY_DIR"); v != "" {
 		cfg.MemoryDir = v
+	}
+	if v := os.Getenv("MEMORY_AUTO_WRITE"); v == "true" {
+		cfg.AutoWrite = true
 	}
 }
