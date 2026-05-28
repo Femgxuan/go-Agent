@@ -187,8 +187,8 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 
 	// Rule pre-filter + LLM classification for long-term memory.
 	if a.classifier != nil {
-		if candidate, ok := extractMemoryFact(input); ok {
-			slog.Info("[memory] rule pre-filter matched", "category", candidate.Category, "input", input)
+		if candidate := extractMemoryFact(input); candidate.ShouldClassify {
+			slog.Info("[memory] rule pre-filter matched", "hint", candidate.Hint, "input", input)
 			go func() {
 				classifyCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
@@ -519,66 +519,45 @@ func (a *Agent) buildMessages(userQuery string) []client.Message {
 }
 
 // extractMemoryFact performs rule-based pre-filtering on user input.
-// Returns a candidate Fact with category hint if patterns match, or zero Fact and false otherwise.
-// The candidate is NOT stored directly — it's passed to the LLM classifier for precise extraction.
-func extractMemoryFact(input string) (memory.Fact, bool) {
+// Returns a MarkdownCandidate indicating whether the input should be sent to the LLM classifier.
+func extractMemoryFact(input string) memory.MarkdownCandidate {
 	input = strings.TrimSpace(input)
 	if input == "" {
-		return memory.Fact{}, false
+		return memory.MarkdownCandidate{}
 	}
 
-	type pattern struct {
-		category memory.FactCategory
-		keywords []string
-	}
-
-	patterns := []pattern{
-		// Explicit requests (prefix match)
-		{memory.FactExplicit, []string{"记住", "remember"}},
+	triggerKeywords := []string{
+		// Explicit requests
+		"记住", "remember", "记录", "make a note",
 		// Preferences
-		{memory.FactPreference, []string{
-			"我喜欢", "我不喜欢", "我想要", "我偏好", "我的爱好", "我最爱",
-			"I like", "I love", "I prefer", "my favorite", "my hobby",
-		}},
+		"我喜欢", "我不喜欢", "我想要", "我偏好", "我的爱好", "我最爱",
+		"I like", "I love", "I prefer", "my favorite", "my hobby",
 		// Environment facts
-		{memory.FactEnvironment, []string{
-			"服务器是", "运行在", "部署在", "系统是", "数据库是",
-			"running on", "deployed on", "server is", "database is",
-		}},
+		"服务器是", "运行在", "部署在", "系统是", "数据库是",
+		"running on", "deployed on", "server is", "database is",
 		// Corrections
-		{memory.FactCorrection, []string{
-			"不要用", "别用", "不用", "请不要", "请别",
-			"don't use", "stop using", "never use", "please don't",
-		}},
+		"不要用", "别用", "不用", "请不要", "请别",
+		"don't use", "stop using", "never use", "please don't",
 		// Norms
-		{memory.FactNorm, []string{
-			"代码风格", "规范是", "约定是", "格式是", "编码规范",
-			"coding style", "convention", "code format",
-		}},
+		"代码风格", "规范是", "约定是", "格式是", "编码规范",
+		"coding style", "convention", "code format",
 		// Milestones
-		{memory.FactMilestone, []string{
-			"完成了", "搞定了", "迁移了", "部署了", "上线了",
-			"finished", "completed", "migrated", "deployed", "shipped",
-		}},
+		"完成了", "搞定了", "迁移了", "部署了", "上线了",
+		"finished", "completed", "migrated", "deployed", "shipped",
+		// Soul-related
+		"你要", "你应该", "你必须", "说话方式", "语气",
+		"you should", "you must", "tone", "style",
 	}
 
 	lower := strings.ToLower(input)
-	for _, p := range patterns {
-		for _, kw := range p.keywords {
-			if strings.Contains(lower, strings.ToLower(kw)) {
-				return memory.Fact{
-					ID:         fmt.Sprintf("fact_%d", time.Now().UnixNano()),
-					Category:   p.category,
-					Key:        string(p.category),
-					Content:    input,
-					Source:     "user",
-					Confidence: 0.5, // rule-based, low confidence
-					CreatedAt:  time.Now(),
-					DecayScore: 1.0,
-				}, true
+	for _, kw := range triggerKeywords {
+		if strings.Contains(lower, strings.ToLower(kw)) {
+			return memory.MarkdownCandidate{
+				ShouldClassify: true,
+				Hint:           kw,
 			}
 		}
 	}
 
-	return memory.Fact{}, false
+	return memory.MarkdownCandidate{}
 }
