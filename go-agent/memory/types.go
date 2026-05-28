@@ -93,6 +93,20 @@ type ForgetFilter struct {
 	KeyPattern *string    // forget by key pattern match
 }
 
+// MarkdownCandidate is the result of rule-based pre-filtering.
+// It indicates whether the input should be sent to the LLM classifier.
+type MarkdownCandidate struct {
+	ShouldClassify bool   // whether to invoke LLM classifier
+	Hint           string // matched keyword, passed to classifier for context
+}
+
+// ClassificationResult is the LLM classifier's decision about which markdown file to write to.
+type ClassificationResult struct {
+	Target  string `json:"target"`  // "soul" | "memory" | "user" | "none"
+	Content string `json:"content"` // curated fact with § prefix
+	Reason  string `json:"reason"`  // why this target
+}
+
 // --- Episodic Memory Types ---
 
 // Session represents a conversation session for episodic memory.
