@@ -10,6 +10,7 @@ import (
 
 	"github.com/fengxuan/go-agent/client"
 	"github.com/fengxuan/go-agent/config"
+	"github.com/fengxuan/go-agent/memory"
 	"github.com/fengxuan/go-agent/runtime"
 	"github.com/fengxuan/go-agent/tools"
 	"github.com/fengxuan/go-agent/tui"
@@ -46,14 +47,23 @@ func main() {
 		}
 	}
 
-	// 4. Build tool registry
-	registry := buildRegistry(cfg)
+	// 4. Initialize memory manager
+	memCfg := memory.DefaultConfig()
+	memory.ApplyEnvOverrides(memCfg)
+	memManager, memErr := memory.NewManager(memCfg)
+	if memErr != nil {
+		fmt.Fprintf(os.Stderr, "warning: memory system unavailable: %v\n", memErr)
+	}
 
-	// 5. Create runtime coordinator
+	// 5. Build tool registry
+	registry := buildRegistry(cfg, memManager)
+
+	// 6. Create runtime coordinator
 	rt, err := runtime.New(runtime.Config{
-		AppConfig:    cfg,
-		ToolRegistry: registry,
-		CreateClient: createClient,
+		AppConfig:     cfg,
+		ToolRegistry:  registry,
+		MemoryManager: memManager,
+		CreateClient:  createClient,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: cannot create runtime: %v\n", err)
@@ -84,14 +94,32 @@ func createClient(provider string, cfg config.ProviderConfig) client.LLMClient {
 }
 
 // buildRegistry creates a tool registry populated with all configured tools.
-func buildRegistry(cfg *config.Config) *tools.Registry {
+func buildRegistry(cfg *config.Config, memManager memory.Manager) *tools.Registry {
 	registry := tools.NewRegistry()
 
+	// Core tools
 	tavilyBaseURL := "https://api.tavily.com/search"
 	registry.Register(tools.NewTavilySearch(cfg.Tools.Tavily.APIKey, tavilyBaseURL))
 	registry.Register(tools.NewShellExec(cfg.Tools.Shell.BlockedCommands))
 	registry.Register(tools.NewReadFile(cfg.Tools.File.MaxReadSize))
 	registry.Register(tools.NewWriteFile())
+
+	// Memory tools (SOUL.md / MEMORY.md / USER.md management)
+	memCfg := memory.DefaultConfig()
+	registry.Register(tools.NewMemoryAppendTool(memCfg.MemoryDir))
+	registry.Register(tools.NewMemoryReplaceTool(memCfg.MemoryDir))
+	registry.Register(tools.NewMemoryDeleteTool(memCfg.MemoryDir))
+
+	// Episodic memory tool (requires PG-backed episodic store)
+	if memManager != nil && memManager.Episodic() != nil {
+		registry.Register(tools.NewSessionSearchTool(memManager.Episodic()))
+	}
+
+	// Skill tools (filesystem-based skill store)
+	if memManager != nil && memManager.Skills() != nil {
+		registry.Register(tools.NewReadSkillTool(memManager.Skills()))
+		registry.Register(tools.NewSkillManageTool(memManager.Skills()))
+	}
 
 	return registry
 }

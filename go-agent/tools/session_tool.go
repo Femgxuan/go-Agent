@@ -18,7 +18,7 @@ func NewSessionSearchTool(episodic memory.EpisodicStore) *SessionSearchTool {
 
 func (t *SessionSearchTool) Name() string        { return "session_search" }
 func (t *SessionSearchTool) Description() string  { return "Search past conversations for relevant context" }
-func (t *SessionSearchTool) Parameters() map[string]any {
+func (t *SessionSearchTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{

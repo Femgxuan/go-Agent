@@ -18,7 +18,7 @@ func NewReadSkillTool(store memory.SkillStore) *ReadSkillTool {
 
 func (t *ReadSkillTool) Name() string        { return "read_skill" }
 func (t *ReadSkillTool) Description() string  { return "Read the full content of a skill" }
-func (t *ReadSkillTool) Parameters() map[string]any {
+func (t *ReadSkillTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -53,13 +53,13 @@ func NewSkillManageTool(store memory.SkillStore) *SkillManageTool {
 
 func (t *SkillManageTool) Name() string        { return "skill_manage" }
 func (t *SkillManageTool) Description() string  { return "Create, edit, patch, or delete skills" }
-func (t *SkillManageTool) Parameters() map[string]any {
+func (t *SkillManageTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"action":  map[string]string{"type": "string", "enum": `["create", "patch", "edit", "delete"]`, "description": "Action to perform"},
-			"name":    map[string]string{"type": "string", "description": "Skill name"},
-			"content": map[string]string{"type": "string", "description": "Skill content (for create/edit/patch)"},
+			"action":  map[string]any{"type": "string", "enum": []string{"create", "patch", "edit", "delete"}, "description": "Action to perform"},
+			"name":    map[string]any{"type": "string", "description": "Skill name"},
+			"content": map[string]any{"type": "string", "description": "Skill content (for create/edit/patch)"},
 		},
 		"required": []string{"action", "name"},
 	}
