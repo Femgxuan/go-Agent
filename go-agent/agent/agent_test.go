@@ -73,7 +73,7 @@ func TestAgentDirectAnswer(t *testing.T) {
 		},
 	}
 	reg := makeRegistry(t, nil)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil, "")
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "hi")
@@ -113,7 +113,7 @@ func TestAgentToolCallLoop(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "search result here"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil, "")
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "search for something")
@@ -186,7 +186,7 @@ func TestAgentMaxIterations(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "result"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 3}, nil, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 3}, nil, nil, "")
 
 	ctx := context.Background()
 	ch := a.Run(ctx, "loop forever")
@@ -228,7 +228,7 @@ func TestAgentContextCancel(t *testing.T) {
 	}
 	tool := &mockTool{name: "search", result: "result"}
 	reg := makeRegistry(t, tool)
-	a := New(llm, reg, AgentConfig{MaxIterations: 100}, nil, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 100}, nil, nil, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -258,7 +258,7 @@ func TestAgentMultiTurn(t *testing.T) {
 		},
 	}
 	reg := makeRegistry(t, nil)
-	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil)
+	a := New(llm, reg, AgentConfig{MaxIterations: 5}, nil, nil, "")
 
 	ctx := context.Background()
 
@@ -302,9 +302,9 @@ func TestExtractMemoryFact_ExplicitRemember(t *testing.T) {
 		{"今天天气怎么样", false},
 	}
 	for _, tt := range tests {
-		_, ok := extractMemoryFact(tt.input)
-		if ok != tt.wantOK {
-			t.Errorf("extractMemoryFact(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
+		candidate := extractMemoryFact(tt.input)
+		if candidate.ShouldClassify != tt.wantOK {
+			t.Errorf("extractMemoryFact(%q) ok = %v, want %v", tt.input, candidate.ShouldClassify, tt.wantOK)
 		}
 	}
 }
@@ -323,9 +323,9 @@ func TestExtractMemoryFact_Preference(t *testing.T) {
 		{"今天天气怎么样", false},
 	}
 	for _, tt := range tests {
-		_, ok := extractMemoryFact(tt.input)
-		if ok != tt.wantOK {
-			t.Errorf("extractMemoryFact(%q) ok = %v, want %v", tt.input, ok, tt.wantOK)
+		candidate := extractMemoryFact(tt.input)
+		if candidate.ShouldClassify != tt.wantOK {
+			t.Errorf("extractMemoryFact(%q) ok = %v, want %v", tt.input, candidate.ShouldClassify, tt.wantOK)
 		}
 	}
 }
