@@ -31,6 +31,7 @@ Available tools (use ONLY when necessary):
 - shell_exec: Use ONLY when you need to run shell commands
 - read_file: Use ONLY when you need to read file contents
 - write_file: Use ONLY when you need to write or create files
+- session_search: Use when the user asks about past conversations, what we discussed before, or anything from previous sessions
 
 When you do use tools, explain your reasoning first. For simple conversations like greetings, just respond naturally.`
 

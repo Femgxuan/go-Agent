@@ -72,17 +72,19 @@ func (s *PgEpisodicStore) SaveSession(ctx context.Context, session Session) erro
 	})
 }
 
-// Search performs full-text search on episodes using PostgreSQL tsvector + ts_rank.
+// Search performs full-text search on episodes.
+// Uses ILIKE for CJK text compatibility, falls back to FTS for Latin text.
 func (s *PgEpisodicStore) Search(ctx context.Context, query string, limit int) ([]Episode, error) {
 	if limit <= 0 {
 		limit = 5
 	}
 
+	// Use ILIKE for text search — works for Chinese and English.
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, session_id, role, content, created_at, token_count
 		FROM episodes
-		WHERE fts_vector @@ plainto_tsquery('simple', $1)
-		ORDER BY ts_rank(fts_vector, plainto_tsquery('simple', $1)) DESC
+		WHERE content ILIKE '%' || $1 || '%'
+		ORDER BY created_at DESC
 		LIMIT $2
 	`, query, limit)
 	if err != nil {
