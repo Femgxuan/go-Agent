@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -73,20 +74,37 @@ func (s *PgEpisodicStore) SaveSession(ctx context.Context, session Session) erro
 }
 
 // Search performs full-text search on episodes.
-// Uses ILIKE for CJK text compatibility, falls back to FTS for Latin text.
+// Splits query into keywords and matches any keyword via ILIKE for CJK compatibility.
 func (s *PgEpisodicStore) Search(ctx context.Context, query string, limit int) ([]Episode, error) {
 	if limit <= 0 {
 		limit = 5
 	}
 
-	// Use ILIKE for text search — works for Chinese and English.
-	rows, err := s.pool.Query(ctx, `
+	// Split query into meaningful keywords (min 2 chars each).
+	keywords := splitKeywords(query)
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+
+	// Build OR conditions: content ILIKE '%kw1%' OR content ILIKE '%kw2%' ...
+	conditions := make([]string, len(keywords))
+	args := make([]any, len(keywords))
+	for i, kw := range keywords {
+		conditions[i] = fmt.Sprintf("content ILIKE $%d", i+1)
+		args[i] = "%" + kw + "%"
+	}
+	where := strings.Join(conditions, " OR ")
+
+	sql := fmt.Sprintf(`
 		SELECT id, session_id, role, content, created_at, token_count
 		FROM episodes
-		WHERE content ILIKE '%' || $1 || '%'
+		WHERE %s
 		ORDER BY created_at DESC
-		LIMIT $2
-	`, query, limit)
+		LIMIT $%d
+	`, where, len(keywords)+1)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search episodes: %w", err)
 	}
@@ -102,6 +120,25 @@ func (s *PgEpisodicStore) Search(ctx context.Context, query string, limit int) (
 	}
 
 	return episodes, rows.Err()
+}
+
+// splitKeywords splits a query into searchable keywords, filtering out short tokens.
+func splitKeywords(query string) []string {
+	// Split by common delimiters: spaces, punctuation, Chinese comma/period
+	f := func(r rune) bool {
+		return r == ' ' || r == ',' || r == '.' || r == '?' || r == '!' ||
+			r == '，' || r == '。' || r == '？' || r == '！' || r == '、' ||
+			r == '"' || r == '"' || r == '（' || r == '）' || r == '(' || r == ')'
+	}
+	parts := strings.FieldsFunc(query, f)
+	var keywords []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if len([]rune(p)) >= 2 { // at least 2 characters
+			keywords = append(keywords, p)
+		}
+	}
+	return keywords
 }
 
 // Summarize uses an LLM to compress search results into a concise summary.
