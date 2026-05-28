@@ -20,4 +20,5 @@ type AgentCallbacks interface {
 	OnToolEnd(tool *ToolProgress, result string)
 	OnStreamDelta(delta string)
 	OnHeartbeat(elapsed time.Duration)
+	OnMemorySuggestion(target, content, reason string)
 }
