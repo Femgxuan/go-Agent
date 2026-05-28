@@ -10,7 +10,7 @@ import (
 	"github.com/fengxuan/go-agent/memory"
 )
 
-// MemoryAppendTool appends content to MEMORY.md or USER.md.
+// MemoryAppendTool appends content to SOUL.md, MEMORY.md or USER.md.
 type MemoryAppendTool struct {
 	memoryDir string
 }
@@ -20,13 +20,13 @@ func NewMemoryAppendTool(memoryDir string) *MemoryAppendTool {
 }
 
 func (t *MemoryAppendTool) Name() string        { return "memory_append" }
-func (t *MemoryAppendTool) Description() string  { return "Append content to MEMORY.md or USER.md" }
-func (t *MemoryAppendTool) Parameters() map[string]any {
+func (t *MemoryAppendTool) Description() string  { return "Append content to SOUL.md, MEMORY.md, or USER.md" }
+func (t *MemoryAppendTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"target":  map[string]string{"type": "string", "enum": `["memory", "user"]`, "description": "Which file to append to"},
-			"content": map[string]string{"type": "string", "description": "Content to append"},
+			"target":  map[string]any{"type": "string", "enum": []string{"soul", "memory", "user"}, "description": "Which file to append to"},
+			"content": map[string]any{"type": "string", "description": "Content to append"},
 		},
 		"required": []string{"target", "content"},
 	}
@@ -51,13 +51,13 @@ func (t *MemoryAppendTool) Execute(ctx context.Context, params map[string]any) (
 
 	filePath := t.getFilePath(target)
 	if filePath == "" {
-		return "", fmt.Errorf("invalid target: %s (use 'memory' or 'user')", target)
+		return "", fmt.Errorf("invalid target: %s (use 'soul', 'memory', or 'user')", target)
 	}
 
 	// Capacity check
 	limit := t.getLimit(target)
 	current, _ := os.ReadFile(filePath)
-	if len(current)+len(content) > limit {
+	if limit > 0 && len(current)+len(content) > limit {
 		return fmt.Sprintf("Error: content would exceed size limit (%d chars). Current: %d, Adding: %d, Limit: %d",
 			limit, len(current), len(content), limit), nil
 	}
@@ -83,6 +83,8 @@ func (t *MemoryAppendTool) Execute(ctx context.Context, params map[string]any) (
 
 func (t *MemoryAppendTool) getFilePath(target string) string {
 	switch target {
+	case "soul":
+		return filepath.Join(t.memoryDir, "SOUL.md")
 	case "memory":
 		return filepath.Join(t.memoryDir, "MEMORY.md")
 	case "user":
@@ -94,6 +96,8 @@ func (t *MemoryAppendTool) getFilePath(target string) string {
 
 func (t *MemoryAppendTool) getLimit(target string) int {
 	switch target {
+	case "soul":
+		return 0
 	case "memory":
 		return 2200
 	case "user":
@@ -103,7 +107,7 @@ func (t *MemoryAppendTool) getLimit(target string) int {
 	}
 }
 
-// MemoryReplaceTool replaces content in MEMORY.md or USER.md.
+// MemoryReplaceTool replaces content in SOUL.md, MEMORY.md, or USER.md.
 type MemoryReplaceTool struct {
 	memoryDir string
 }
@@ -113,14 +117,14 @@ func NewMemoryReplaceTool(memoryDir string) *MemoryReplaceTool {
 }
 
 func (t *MemoryReplaceTool) Name() string        { return "memory_replace" }
-func (t *MemoryReplaceTool) Description() string  { return "Replace content in MEMORY.md or USER.md" }
-func (t *MemoryReplaceTool) Parameters() map[string]any {
+func (t *MemoryReplaceTool) Description() string  { return "Replace content in SOUL.md, MEMORY.md, or USER.md" }
+func (t *MemoryReplaceTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"target":      map[string]string{"type": "string", "enum": `["memory", "user"]`},
-			"old_content": map[string]string{"type": "string", "description": "Content to find and replace"},
-			"new_content": map[string]string{"type": "string", "description": "Replacement content"},
+			"target":      map[string]any{"type": "string", "enum": []string{"soul", "memory", "user"}},
+			"old_content": map[string]any{"type": "string", "description": "Content to find and replace"},
+			"new_content": map[string]any{"type": "string", "description": "Replacement content"},
 		},
 		"required": []string{"target", "old_content", "new_content"},
 	}
@@ -140,7 +144,7 @@ func (t *MemoryReplaceTool) Execute(ctx context.Context, params map[string]any) 
 		return "Security warnings:\n" + strings.Join(msgs, "\n"), nil
 	}
 
-	filePath := filepath.Join(t.memoryDir, map[string]string{"memory": "MEMORY.md", "user": "USER.md"}[target])
+	filePath := filepath.Join(t.memoryDir, map[string]string{"soul": "SOUL.md", "memory": "MEMORY.md", "user": "USER.md"}[target])
 	current, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
@@ -154,8 +158,8 @@ func (t *MemoryReplaceTool) Execute(ctx context.Context, params map[string]any) 
 	updated := strings.Replace(content, oldContent, newContent, 1)
 
 	// Capacity check
-	limit := map[string]int{"memory": 2200, "user": 1375}[target]
-	if len(updated) > limit {
+	limit := map[string]int{"soul": 0, "memory": 2200, "user": 1375}[target]
+	if limit > 0 && len(updated) > limit {
 		return fmt.Sprintf("Error: replacement would exceed limit (%d chars)", limit), nil
 	}
 
@@ -169,7 +173,7 @@ func (t *MemoryReplaceTool) Execute(ctx context.Context, params map[string]any) 
 	return "Content replaced. Changes will take effect in next session.", nil
 }
 
-// MemoryDeleteTool deletes content from MEMORY.md or USER.md.
+// MemoryDeleteTool deletes content from SOUL.md, MEMORY.md, or USER.md.
 type MemoryDeleteTool struct {
 	memoryDir string
 }
@@ -179,13 +183,13 @@ func NewMemoryDeleteTool(memoryDir string) *MemoryDeleteTool {
 }
 
 func (t *MemoryDeleteTool) Name() string        { return "memory_delete" }
-func (t *MemoryDeleteTool) Description() string  { return "Delete content from MEMORY.md or USER.md" }
-func (t *MemoryDeleteTool) Parameters() map[string]any {
+func (t *MemoryDeleteTool) Description() string  { return "Delete content from SOUL.md, MEMORY.md, or USER.md" }
+func (t *MemoryDeleteTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"target":  map[string]string{"type": "string", "enum": `["memory", "user"]`},
-			"content": map[string]string{"type": "string", "description": "Content to remove"},
+			"target":  map[string]any{"type": "string", "enum": []string{"soul", "memory", "user"}},
+			"content": map[string]any{"type": "string", "description": "Content to remove"},
 		},
 		"required": []string{"target", "content"},
 	}
@@ -195,7 +199,7 @@ func (t *MemoryDeleteTool) Execute(ctx context.Context, params map[string]any) (
 	target, _ := params["target"].(string)
 	content, _ := params["content"].(string)
 
-	filePath := filepath.Join(t.memoryDir, map[string]string{"memory": "MEMORY.md", "user": "USER.md"}[target])
+	filePath := filepath.Join(t.memoryDir, map[string]string{"soul": "SOUL.md", "memory": "MEMORY.md", "user": "USER.md"}[target])
 	current, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
