@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -31,17 +32,17 @@ func NewOpenAIClient(baseURL, apiKey, model string) *OpenAIClient {
 // --- JSON structures for the OpenAI API ---
 
 type openAIRequest struct {
-	Model    string           `json:"model"`
-	Messages []openAIMessage  `json:"messages"`
-	Tools    []ToolSchema     `json:"tools,omitempty"`
-	Stream   bool             `json:"stream"`
+	Model    string          `json:"model"`
+	Messages []openAIMessage `json:"messages"`
+	Tools    []ToolSchema    `json:"tools,omitempty"`
+	Stream   bool            `json:"stream"`
 }
 
 type openAIMessage struct {
-	Role       string             `json:"role"`
-	Content    *string            `json:"content"`
+	Role       string              `json:"role"`
+	Content    *string             `json:"content"`
 	ToolCalls  []openAIToolCallOut `json:"tool_calls,omitempty"`
-	ToolCallID string             `json:"tool_call_id,omitempty"`
+	ToolCallID string              `json:"tool_call_id,omitempty"`
 }
 
 type openAIToolCallOut struct {
@@ -148,8 +149,9 @@ func (c *OpenAIClient) ChatCompletion(ctx context.Context, req ChatRequest) (<-c
 		return nil, fmt.Errorf("http request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		bodyBytes, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
-		return nil, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("unexpected status: %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	ch := make(chan StreamChunk, 16)
