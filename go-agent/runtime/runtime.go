@@ -34,9 +34,10 @@ When you do use tools, explain your reasoning first. For simple conversations li
 
 // Config holds the dependencies needed to build a Runtime.
 type Config struct {
-	AppConfig    *config.Config
-	ToolRegistry *tools.Registry
-	CreateClient func(provider string, cfg config.ProviderConfig) client.LLMClient
+	AppConfig     *config.Config
+	ToolRegistry  *tools.Registry
+	MemoryManager memory.Manager // optional; if nil, runtime creates its own
+	CreateClient  func(provider string, cfg config.ProviderConfig) client.LLMClient
 }
 
 // Runtime coordinates all subsystems: agent, skills, rules, commands, and prompt building.
@@ -81,10 +82,18 @@ func New(cfg Config) (*Runtime, error) {
 	memory.ApplyEnvOverrides(memCfg)
 	slog.Info("[runtime] memory config", "postgres_url", memCfg.LongTerm.PostgresURL, "working_max_tokens", memCfg.Working.MaxTokens)
 
-	memManager, err := memory.NewManager(memCfg)
-	if err != nil {
-		slog.Warn("[runtime] memory system unavailable, falling back", "error", err)
+	var memManager memory.Manager
+	if cfg.MemoryManager != nil {
+		memManager = cfg.MemoryManager
+		slog.Info("[runtime] using pre-initialized memory manager")
 	} else {
+		var err error
+		memManager, err = memory.NewManager(memCfg)
+		if err != nil {
+			slog.Warn("[runtime] memory system unavailable, falling back", "error", err)
+		}
+	}
+	if memManager != nil {
 		ctx := context.Background()
 		memManager.StartSession(ctx, "default")
 		slog.Info("[runtime] memory system initialized successfully")
@@ -104,9 +113,10 @@ func New(cfg Config) (*Runtime, error) {
 		Model:         providerCfg.Model,
 		MaxTokens:     memCfg.Working.MaxTokens,
 		MemoryEnabled: memManager != nil,
+		AutoWrite:     memCfg.AutoWrite,
 	}
 	slog.Info("[runtime] agent config", "memory_enabled", agentCfg.MemoryEnabled)
-	ag := agent.New(llm, cfg.ToolRegistry, agentCfg, memManager, classifier)
+	ag := agent.New(llm, cfg.ToolRegistry, agentCfg, memManager, classifier, memCfg.MemoryDir)
 
 	// Determine user and project directories.
 	homeDir, err := os.UserHomeDir()

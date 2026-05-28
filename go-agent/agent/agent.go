@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -23,6 +25,7 @@ type AgentConfig struct {
 	Model         string
 	MaxTokens     int  // working memory window size
 	MemoryEnabled bool // whether to enable the memory system
+	AutoWrite     bool // auto-write classified facts to markdown files
 }
 
 // Agent is a ReAct-style agent that uses an LLM and tools.
@@ -35,10 +38,11 @@ type Agent struct {
 	callbacks  AgentCallbacks
 	memory     memory.Manager
 	classifier *memory.Classifier
+	memoryDir  string
 }
 
 // New creates a new Agent.
-func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig, mem memory.Manager, classifier *memory.Classifier) *Agent {
+func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig, mem memory.Manager, classifier *memory.Classifier, memoryDir string) *Agent {
 	if config.MaxIterations <= 0 {
 		config.MaxIterations = 10
 	}
@@ -51,6 +55,7 @@ func New(llm client.LLMClient, registry *tools.Registry, config AgentConfig, mem
 		config:     config,
 		memory:     mem,
 		classifier: classifier,
+		memoryDir:  memoryDir,
 	}
 }
 
@@ -185,26 +190,30 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 		}()
 	}
 
-	// Rule pre-filter + LLM classification for long-term memory.
+	// Markdown classification: rule pre-filter + LLM classifier
 	if a.classifier != nil {
 		if candidate := extractMemoryFact(input); candidate.ShouldClassify {
 			slog.Info("[memory] rule pre-filter matched", "hint", candidate.Hint, "input", input)
 			go func() {
 				classifyCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
-				if result, ok := a.classifier.Classify(classifyCtx, input, lastAssistant); ok {
-					slog.Info("[memory] LLM classified as storable", "target", result.Target, "content", result.Content, "reason", result.Reason)
-					// TODO: write to markdown file via OnMemorySuggestion callback (Task 6)
-					_ = result
+				result, ok := a.classifier.Classify(classifyCtx, input, lastAssistant)
+				if ok && result.Target != "none" {
+					slog.Info("[memory] classified for markdown", "target", result.Target, "content", result.Content)
+					if a.config.AutoWrite {
+						if err := appendToMarkdown(a.memoryDir, result.Target, result.Content); err != nil {
+							slog.Warn("[memory] failed to write markdown", "error", err)
+						}
+					} else if a.callbacks != nil {
+						a.callbacks.OnMemorySuggestion(result.Target, result.Content, result.Reason)
+					}
 				} else {
-					slog.Info("[memory] LLM classified as NOT storable")
+					slog.Info("[memory] classifier returned none or failed")
 				}
 			}()
 		} else {
 			slog.Info("[memory] rule pre-filter: no match", "input", input)
 		}
-	} else {
-		slog.Info("[memory] classifier is nil, skipping classification")
 	}
 }
 
@@ -560,4 +569,52 @@ func extractMemoryFact(input string) memory.MarkdownCandidate {
 	}
 
 	return memory.MarkdownCandidate{}
+}
+
+// appendToMarkdown writes a curated fact to the target markdown file.
+// Uses the same security/backup/append logic as MemoryAppendTool.
+func appendToMarkdown(memoryDir, target, content string) error {
+	filePath := filepath.Join(memoryDir, map[string]string{
+		"soul": "SOUL.md", "memory": "MEMORY.md", "user": "USER.md",
+	}[target])
+	if filePath == "" {
+		return fmt.Errorf("invalid target: %s", target)
+	}
+
+	// 1. Security scan
+	if warnings := memory.ScanForInjection(content); len(warnings) > 0 {
+		var msgs []string
+		for _, w := range warnings {
+			msgs = append(msgs, fmt.Sprintf("[%s] %s", w.Type, w.Detail))
+		}
+		return fmt.Errorf("security warning: %s", strings.Join(msgs, "; "))
+	}
+
+	// 2. Read current, capacity check
+	current, _ := os.ReadFile(filePath)
+	limit := map[string]int{"memory": 2200, "user": 1375}[target] // soul: no limit (0)
+	if limit > 0 && len(current)+len(content) > limit {
+		return fmt.Errorf("capacity exceeded: current %d + new %d > limit %d", len(current), len(content), limit)
+	}
+
+	// 3. Backup
+	os.WriteFile(filePath+".bak", current, 0o644)
+
+	// 4. Append with timestamp
+	timestamp := time.Now().Format("2006-01-02")
+	entry := fmt.Sprintf("\n<!-- written %s -->\n%s\n", timestamp, content)
+
+	f, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+	defer f.Close()
+
+	if len(current) > 0 && !strings.HasSuffix(string(current), "\n") {
+		f.WriteString("\n")
+	}
+	f.WriteString(entry)
+
+	slog.Info("[memory] wrote to markdown", "target", target, "content", content)
+	return nil
 }
