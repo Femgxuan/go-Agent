@@ -12,7 +12,7 @@ import (
 )
 
 // Classifier uses an LLM to classify whether user input contains
-// information worth storing in long-term memory.
+// information worth saving to a markdown file (SOUL.md, MEMORY.md, or USER.md).
 type Classifier struct {
 	llm client.LLMClient
 }
@@ -22,39 +22,28 @@ func NewClassifier(llm client.LLMClient) *Classifier {
 	return &Classifier{llm: llm}
 }
 
-// classificationResponse is the expected JSON output from the LLM.
-type classificationResponse struct {
-	ShouldStore bool   `json:"should_store"`
-	Category    string `json:"category"`
-	Key         string `json:"key"`
-	Content     string `json:"content"`
-	Reason      string `json:"reason"`
-}
-
-const classifyPrompt = `You are a memory classifier. Given a user message and an assistant reply, determine if the user's message contains information worth remembering long-term.
+const classifyPrompt = `You are a memory classifier. Given a user message and an assistant reply, determine if the message contains information worth saving to a markdown file.
 
 Categories:
-- preference: User preferences, likes, dislikes ("I like Go", "我不喜欢Java")
-- environment: Environment facts, server info, tech stack ("服务器是Debian 12", "We use PostgreSQL")
-- correction: Corrections to agent behavior ("不要用sudo", "Don't use tabs")
-- norm: Project conventions, coding style ("代码风格用Google", "Use 120-char lines")
-- milestone: Completed work, achievements ("完成了迁移", "Finished the auth module")
-- explicit: Direct memory requests ("记住...", "Remember...")
+- soul: Agent personality, communication style, behavior boundaries, values
+  ("be concise", "don't use emojis", "ask before destructive ops")
+- memory: Project context, tech stack, environment, work conventions
+  ("we use PostgreSQL", "code style is Google", "repo at ~/code/proj")
+- user: User personal facts, preferences, habits, constraints
+  ("my name is Alice", "I prefer Go", "I have a toddler")
+- none: Trivial info, temporary tasks, easily re-rediscoverable facts
 
 Rules:
-- DO NOT store: greetings, general questions, tool requests, temporary info, things easily re-searchable
-- DO store: facts/preferences/rules that remain true across sessions
-- If user says something like "帮我查天气" (check weather), should_store=false
-- If user says "我喜欢Go" (I like Go), should_store=true, category=preference
+- DO NOT store: greetings, questions, tool requests, temporary info
+- DO store: stable facts that remain true across sessions
+- Curate: distill to 1-2 sentences, add § prefix
 
-Respond with ONLY a JSON object:
-{"should_store": true/false, "category": "...", "key": "short title", "content": "extracted fact", "reason": "why"}
+Respond with ONLY JSON:
+{"target": "soul"|"memory"|"user"|"none", "content": "§ curated fact", "reason": "why"}`
 
-If should_store is false, category/key/content can be empty strings.`
-
-// Classify determines whether the user input contains a storable fact.
-// It returns a Fact if classification succeeds and should_store=true, or zero Fact and false otherwise.
-func (c *Classifier) Classify(ctx context.Context, userMsg, assistantMsg string) (Fact, bool) {
+// Classify determines whether the user input contains a fact worth saving to a markdown file.
+// Returns a ClassificationResult and true if the result should be written, or zero value and false otherwise.
+func (c *Classifier) Classify(ctx context.Context, userMsg, assistantMsg string) (ClassificationResult, bool) {
 	prompt := fmt.Sprintf("%s\n\nUser: %s\nAssistant: %s", classifyPrompt, userMsg, assistantMsg)
 
 	req := client.ChatRequest{
@@ -66,14 +55,14 @@ func (c *Classifier) Classify(ctx context.Context, userMsg, assistantMsg string)
 	streamCh, err := c.llm.ChatCompletion(ctx, req)
 	if err != nil {
 		slog.Warn("[classifier] LLM call failed", "error", err)
-		return Fact{}, false
+		return ClassificationResult{}, false
 	}
 
 	var fullContent string
 	for chunk := range streamCh {
 		if chunk.Err != nil {
 			slog.Warn("[classifier] stream error", "error", chunk.Err)
-			return Fact{}, false
+			return ClassificationResult{}, false
 		}
 		fullContent += chunk.Delta
 	}
@@ -87,32 +76,26 @@ func (c *Classifier) Classify(ctx context.Context, userMsg, assistantMsg string)
 
 	slog.Info("[classifier] LLM response", "raw", fullContent)
 
-	var resp classificationResponse
+	var resp ClassificationResult
 	if err := json.Unmarshal([]byte(fullContent), &resp); err != nil {
 		slog.Warn("[classifier] JSON parse failed", "error", err, "raw", fullContent)
-		return Fact{}, false
+		return ClassificationResult{}, false
 	}
 
-	if !resp.ShouldStore {
-		return Fact{}, false
-	}
-
-	category := FactCategory(resp.Category)
-	switch category {
-	case FactPreference, FactEnvironment, FactCorrection, FactNorm, FactMilestone, FactExplicit:
-		// valid
+	switch resp.Target {
+	case "soul", "memory", "user":
+		// valid target
+	case "none":
+		return ClassificationResult{}, false
 	default:
-		category = FactExplicit // fallback
+		slog.Warn("[classifier] unknown target", "target", resp.Target)
+		return ClassificationResult{}, false
 	}
 
-	return Fact{
-		ID:         fmt.Sprintf("fact_%d", time.Now().UnixNano()),
-		Category:   category,
-		Key:        resp.Key,
-		Content:    resp.Content,
-		Source:     "user",
-		Confidence: 0.8,
-		CreatedAt:  time.Now(),
-		DecayScore: 1.0,
-	}, true
+	if resp.Content == "" {
+		return ClassificationResult{}, false
+	}
+
+	_ = time.Now() // ensure time import is used
+	return resp, true
 }

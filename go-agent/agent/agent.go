@@ -192,14 +192,10 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 			go func() {
 				classifyCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
-				if fact, ok := a.classifier.Classify(classifyCtx, input, lastAssistant); ok {
-					slog.Info("[memory] LLM classified as storable", "category", fact.Category, "key", fact.Key, "content", fact.Content)
-					memCtx := context.Background()
-					if err := a.memory.Memorize(memCtx, fact); err != nil {
-						slog.Warn("[memory] failed to memorize classified fact", "error", err)
-					} else {
-						slog.Info("[memory] fact memorized successfully", "id", fact.ID)
-					}
+				if result, ok := a.classifier.Classify(classifyCtx, input, lastAssistant); ok {
+					slog.Info("[memory] LLM classified as storable", "target", result.Target, "content", result.Content, "reason", result.Reason)
+					// TODO: write to markdown file via OnMemorySuggestion callback (Task 6)
+					_ = result
 				} else {
 					slog.Info("[memory] LLM classified as NOT storable")
 				}
