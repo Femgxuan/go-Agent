@@ -27,17 +27,22 @@ type Embedder interface {
 
 // OpenAIEmbedder uses the OpenAI API embedding model
 type OpenAIEmbedder struct {
-	apiKey string
-	model  string
-	client *http.Client
+	apiKey  string
+	model   string
+	baseURL string
+	client  *http.Client
 }
 
 // NewOpenAIEmbedder creates a new OpenAIEmbedder
-func NewOpenAIEmbedder(apiKey, model string) *OpenAIEmbedder {
+func NewOpenAIEmbedder(apiKey, model, baseURL string) *OpenAIEmbedder {
+	if baseURL == "" {
+		baseURL = "https://api.openai.com/v1/embeddings"
+	}
 	return &OpenAIEmbedder{
-		apiKey: apiKey,
-		model:  model,
-		client: &http.Client{Timeout: 30 * time.Second},
+		apiKey:  apiKey,
+		model:   model,
+		baseURL: baseURL,
+		client:  &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -62,7 +67,7 @@ func (e *OpenAIEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]fl
 		return nil, fmt.Errorf("marshaling request: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", "https://api.openai.com/v1/embeddings", bytes.NewReader(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", e.baseURL, bytes.NewReader(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -110,6 +115,12 @@ func (e *OpenAIEmbedder) Dimension() int {
 		return 1536
 	case "text-embedding-3-large":
 		return 3072
+	case "BAAI/bge-small-zh-v1.5":
+		return 512
+	case "BAAI/bge-base-zh-v1.5":
+		return 768
+	case "BAAI/bge-large-zh-v1.5":
+		return 1024
 	default:
 		return 1536
 	}

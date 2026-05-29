@@ -116,7 +116,7 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 					slog.Warn("OpenAI API key not set, falling back to hash embedder")
 					embedder = NewHashEmbedder(1536)
 				} else {
-					embedder = NewOpenAIEmbedder(cfg.LongTerm.Embedder.APIKey, cfg.LongTerm.Embedder.Model)
+					embedder = NewOpenAIEmbedder(cfg.LongTerm.Embedder.APIKey, cfg.LongTerm.Embedder.Model, "")
 					slog.Info("using OpenAI embedder", "model", cfg.LongTerm.Embedder.Model)
 				}
 			}
