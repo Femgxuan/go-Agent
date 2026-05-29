@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"math/rand"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -149,17 +150,37 @@ func (s *PgEpisodicStore) Search(ctx context.Context, query string, limit int) (
 	return merged, nil
 }
 
-// ftsSearch performs full-text search using PostgreSQL tsvector.
+// ftsSearch performs text search using ILIKE for CJK compatibility.
 func (s *PgEpisodicStore) ftsSearch(ctx context.Context, query string, limit int) []Episode {
-	rows, err := s.pool.Query(ctx, `
+	keywords := extractKeywords(query)
+	if len(keywords) == 0 {
+		return nil
+	}
+
+	// Build OR conditions for each keyword.
+	var conditions []string
+	var args []any
+	argIdx := 1
+	for _, kw := range keywords {
+		conditions = append(conditions,
+			fmt.Sprintf("content ILIKE '%%' || $%d || '%%'", argIdx))
+		args = append(args, kw)
+		argIdx++
+	}
+	where := strings.Join(conditions, " OR ")
+
+	sql := fmt.Sprintf(`
 		SELECT id, session_id, role, content, created_at, token_count
 		FROM episodes
-		WHERE fts_vector @@ plainto_tsquery('simple', $1)
-		ORDER BY ts_rank(fts_vector, plainto_tsquery('simple', $1)) DESC
-		LIMIT $2
-	`, query, limit)
+		WHERE %s
+		ORDER BY created_at DESC
+		LIMIT $%d
+	`, where, argIdx)
+	args = append(args, limit)
+
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
-		slog.Warn("[episodic] fts search failed", "error", err)
+		slog.Warn("[episodic] fts search failed", "error", err, "keywords", keywords)
 		return nil
 	}
 	defer rows.Close()
