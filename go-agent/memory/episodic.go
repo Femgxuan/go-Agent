@@ -85,11 +85,33 @@ func (s *PgEpisodicStore) SaveSession(ctx context.Context, session Session) erro
 			if s.tokenizer != nil {
 				tokenCount = s.tokenizer.Count(ep.Content)
 			}
-			_, err = tx.Exec(ctx, `
-				INSERT INTO episodes (id, session_id, role, content, created_at, token_count)
-				VALUES ($1, $2, $3, $4, $5, $6)
-				ON CONFLICT (id) DO NOTHING
-			`, ep.ID, session.ID, ep.Role, ep.Content, ep.CreatedAt, tokenCount)
+
+			// Generate embedding if embedder available
+			var embedding pgvector.Vector
+			hasEmbedding := false
+			if s.embedder != nil && s.hasEmbedding {
+				vec, err := s.embedder.Embed(ctx, ep.Content)
+				if err != nil {
+					slog.Warn("[episodic] embedding failed, storing without vector", "error", err, "episode_id", ep.ID)
+				} else {
+					embedding = pgvector.NewVector(toFloat32(vec))
+					hasEmbedding = true
+				}
+			}
+
+			if hasEmbedding {
+				_, err = tx.Exec(ctx, `
+					INSERT INTO episodes (id, session_id, role, content, created_at, token_count, embedding)
+					VALUES ($1, $2, $3, $4, $5, $6, $7)
+					ON CONFLICT (id) DO NOTHING
+				`, ep.ID, session.ID, ep.Role, ep.Content, ep.CreatedAt, tokenCount, embedding)
+			} else {
+				_, err = tx.Exec(ctx, `
+					INSERT INTO episodes (id, session_id, role, content, created_at, token_count)
+					VALUES ($1, $2, $3, $4, $5, $6)
+					ON CONFLICT (id) DO NOTHING
+				`, ep.ID, session.ID, ep.Role, ep.Content, ep.CreatedAt, tokenCount)
+			}
 			if err != nil {
 				return fmt.Errorf("insert episode: %w", err)
 			}
