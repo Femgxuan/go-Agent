@@ -111,6 +111,20 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 			case "hash":
 				embedder = NewHashEmbedder(1536)
 				slog.Info("using hash embedder (no API needed)")
+			case "huggingface":
+				baseURL := cfg.LongTerm.Embedder.BaseURL
+				if baseURL == "" {
+					baseURL = fmt.Sprintf("https://api-inference.huggingface.co/models/%s/embeddings", cfg.LongTerm.Embedder.Model)
+				}
+				embedder = NewOpenAIEmbedder(cfg.LongTerm.Embedder.APIKey, cfg.LongTerm.Embedder.Model, baseURL)
+				slog.Info("using HuggingFace embedder", "baseURL", baseURL, "model", cfg.LongTerm.Embedder.Model)
+			case "modelscope":
+				baseURL := cfg.LongTerm.Embedder.BaseURL
+				if baseURL == "" {
+					baseURL = "https://api-inference.modelscope.cn/v1/embeddings"
+				}
+				embedder = NewOpenAIEmbedder(cfg.LongTerm.Embedder.APIKey, cfg.LongTerm.Embedder.Model, baseURL)
+				slog.Info("using ModelScope embedder", "baseURL", baseURL, "model", cfg.LongTerm.Embedder.Model)
 			default: // "openai"
 				if cfg.LongTerm.Embedder.APIKey == "" {
 					slog.Warn("OpenAI API key not set, falling back to hash embedder")
