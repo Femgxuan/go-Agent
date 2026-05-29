@@ -1,4 +1,4 @@
-:default_provider: openai
+default_provider: openai
 max_iterations: 10
 
 providers:
@@ -15,6 +15,12 @@ providers:
     base_url: https://api.anthropic.com
     model: claude-sonnet-4-20250514
 
+embedding:
+  provider: huggingface
+  api_key: hf_xxxxx              # 换成你的 HuggingFace token
+  base_url: ""                   # 留空使用默认 HuggingFace API
+  model: BAAI/bge-small-zh-v1.5
+
 tools:
   tavily:
     api_key: tvly-your-key-here
@@ -26,3 +32,12 @@ tools:
       - "mkfs"
   file:
     max_read_size: 1048576
+
+memory:
+  long_term:
+    postgres_url: "postgres://FengXuan:12345678@localhost:5432/FengXuan"
+    embedder_provider: huggingface
+    hybrid:
+      fts_weight: 0.3
+      vector_weight: 0.7
+      rrf_k: 60
