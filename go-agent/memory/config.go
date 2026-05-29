@@ -32,6 +32,11 @@ type Config struct {
 			BaseURL  string `yaml:"base_url" env:"MEMORY_EMBEDDER_BASE_URL"` // for ollama
 		} `yaml:"embedder"`
 		HalfLife time.Duration `yaml:"half_life" env:"MEMORY_LONGTERM_HALF_LIFE"`
+		Hybrid   struct {
+			FTSWeight    float64 `yaml:"fts_weight" env:"MEMORY_HYBRID_FTS_WEIGHT"`
+			VectorWeight float64 `yaml:"vector_weight" env:"MEMORY_HYBRID_VECTOR_WEIGHT"`
+			RRFK         int     `yaml:"rrf_k" env:"MEMORY_HYBRID_RRF_K"`
+		} `yaml:"hybrid"`
 	} `yaml:"long_term"`
 
 	// Episodic memory configuration
@@ -87,6 +92,9 @@ func DefaultConfig() *Config {
 	cfg.LongTerm.Embedder.Provider = "openai"
 	cfg.LongTerm.Embedder.Model = "text-embedding-3-small"
 	cfg.LongTerm.HalfLife = 30 * 24 * time.Hour // 30 days
+	cfg.LongTerm.Hybrid.FTSWeight = 0.3
+	cfg.LongTerm.Hybrid.VectorWeight = 0.7
+	cfg.LongTerm.Hybrid.RRFK = 60
 
 	// Episodic memory defaults
 	cfg.Episodic.Enabled = true
@@ -140,6 +148,21 @@ func ApplyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("MEMORY_EMBEDDER_BASE_URL"); v != "" {
 		cfg.LongTerm.Embedder.BaseURL = v
+	}
+	if v := os.Getenv("MEMORY_HYBRID_FTS_WEIGHT"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.LongTerm.Hybrid.FTSWeight = f
+		}
+	}
+	if v := os.Getenv("MEMORY_HYBRID_VECTOR_WEIGHT"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.LongTerm.Hybrid.VectorWeight = f
+		}
+	}
+	if v := os.Getenv("MEMORY_HYBRID_RRF_K"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.LongTerm.Hybrid.RRFK = n
+		}
 	}
 	if v := os.Getenv("MEMORY_DIR"); v != "" {
 		cfg.MemoryDir = v
