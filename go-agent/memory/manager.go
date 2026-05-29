@@ -41,9 +41,6 @@ type Manager interface {
 	// Episodic returns the episodic memory store (may be nil if disabled).
 	Episodic() EpisodicStore
 
-	// Semantic returns the semantic memory store.
-	Semantic() SemanticStore
-
 	// Skills returns the skill store (may be nil if not configured).
 	Skills() SkillStore
 
@@ -57,7 +54,6 @@ type DefaultManager struct {
 	config         *Config
 	working        *WorkingMemoryImpl
 	shortTerm      ShortTermMemory
-	longTerm       LongTermMemory
 	meta           MetaMemory
 	currentSession SessionID
 	sessionCounter int
@@ -87,10 +83,10 @@ func NewManager(cfg *Config, appCfg *config.Config) (*DefaultManager, error) {
 	// Create meta memory.
 	meta := NewFileMetaMemory(cfg.Meta.StorageDir)
 
-	// Try to create long-term memory (pgvector). Degrade gracefully if unavailable.
-	var longTerm LongTermMemory
+	// Create episodic store (primary memory for conversation history).
 	var pool *pgxpool.Pool
 	var embedder Embedder
+	var episodic EpisodicStore
 	if cfg.LongTerm.PostgresURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -98,7 +94,7 @@ func NewManager(cfg *Config, appCfg *config.Config) (*DefaultManager, error) {
 		var err error
 		pool, err = NewPgPool(ctx, cfg.LongTerm.PostgresURL)
 		if err != nil {
-			slog.Warn("PostgreSQL unavailable, long-term memory disabled", "error", err, "url", cfg.LongTerm.PostgresURL)
+			slog.Warn("PostgreSQL unavailable, episodic memory disabled", "error", err, "url", cfg.LongTerm.PostgresURL)
 		} else {
 			// Create embedder based on provider from top-level embedding config.
 			embeddingCfg := appCfg.Embedding
@@ -136,17 +132,13 @@ func NewManager(cfg *Config, appCfg *config.Config) (*DefaultManager, error) {
 					slog.Info("using OpenAI embedder", "model", embeddingCfg.Model)
 				}
 			}
-			longTerm = NewPgLongTermMemory(pool, embedder)
-			slog.Info("long-term memory enabled", "provider", embeddingCfg.Provider, "postgres", cfg.LongTerm.PostgresURL)
-		}
-	}
 
-	// Create episodic store.
-	var episodic EpisodicStore
-	if cfg.Episodic.Enabled && pool != nil {
-		episodic = NewPgEpisodicStore(pool, nil, tokenizer, embedder,
-			cfg.LongTerm.Hybrid.FTSWeight, cfg.LongTerm.Hybrid.VectorWeight, cfg.LongTerm.Hybrid.RRFK)
-		slog.Info("episodic memory enabled")
+			if cfg.Episodic.Enabled {
+				episodic = NewPgEpisodicStore(pool, nil, tokenizer, embedder,
+					cfg.LongTerm.Hybrid.FTSWeight, cfg.LongTerm.Hybrid.VectorWeight, cfg.LongTerm.Hybrid.RRFK)
+				slog.Info("episodic memory enabled", "provider", embeddingCfg.Provider, "postgres", cfg.LongTerm.PostgresURL)
+			}
+		}
 	}
 
 	// Create skill store.
@@ -163,7 +155,6 @@ func NewManager(cfg *Config, appCfg *config.Config) (*DefaultManager, error) {
 		config:     cfg,
 		working:    working,
 		shortTerm:  shortTerm,
-		longTerm:   longTerm,
 		meta:       meta,
 		episodic:   episodic,
 		skillStore: skillStore,
@@ -188,8 +179,15 @@ func (m *DefaultManager) Retrieve(ctx context.Context, query string, opts Retrie
 			slog.Info("[retrieve] found episodes", "count", len(episodes))
 			// Convert episodes to facts for compatibility
 			for _, ep := range episodes {
+				roleLabel := "对话"
+				if ep.Role == "user" {
+					roleLabel = "用户"
+				} else if ep.Role == "assistant" {
+					roleLabel = "助手"
+				}
 				result.RelevantFacts = append(result.RelevantFacts, Fact{
 					ID:        ep.ID,
+					Key:       roleLabel,
 					Content:   ep.Content,
 					Source:    "episodic",
 					CreatedAt: ep.CreatedAt,
@@ -302,13 +300,6 @@ func (m *DefaultManager) Episodic() EpisodicStore {
 }
 
 // Semantic returns the semantic memory store.
-func (m *DefaultManager) Semantic() SemanticStore {
-	if m.longTerm != nil {
-		return m.longTerm.(SemanticStore)
-	}
-	return nil
-}
-
 // Skills returns the skill store.
 func (m *DefaultManager) Skills() SkillStore {
 	return m.skillStore

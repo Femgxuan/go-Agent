@@ -189,7 +189,9 @@ func (a *Agent) storeInteraction(ctx context.Context, input string) {
 			}
 
 			// Save to episodic memory (PostgreSQL) for long-term search.
-			if episodic := a.memory.Episodic(); episodic != nil {
+			episodic := a.memory.Episodic()
+			slog.Info("[agent] checking episodic store", "nil", episodic == nil)
+			if episodic != nil {
 				now := time.Now()
 				session := memory.Session{
 					ID:        fmt.Sprintf("session-%d", now.UnixMilli()),
