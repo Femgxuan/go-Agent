@@ -234,15 +234,10 @@ func (m *DefaultManager) Memorize(ctx context.Context, fact Fact) error {
 	m.working.Remember(key, fact.Content)
 	slog.Info("[memorize] stored in working memory", "key", key, "content", fact.Content)
 
-	if m.longTerm != nil {
-		if err := m.longTerm.Store(ctx, fact); err != nil {
-			slog.Warn("[memorize] failed to store in long-term memory", "error", err, "key", fact.Key)
-			return fmt.Errorf("long-term storage failed: %w", err)
-		}
-		slog.Info("[memorize] stored in long-term memory (PG)", "id", fact.ID, "category", fact.Category)
-	} else {
-		slog.Info("[memorize] long-term memory is nil, skipping PG storage")
-	}
+	// Facts table deprecated — no longer writing to long-term storage.
+	// Knowledge is now stored in markdown files (SOUL/MEMORY/USER.md)
+	// and conversation history in episodes table.
+
 	return nil
 }
 
