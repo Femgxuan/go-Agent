@@ -89,6 +89,7 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 	// Try to create long-term memory (pgvector). Degrade gracefully if unavailable.
 	var longTerm LongTermMemory
 	var pool *pgxpool.Pool
+	var embedder Embedder
 	if cfg.LongTerm.PostgresURL != "" {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -99,7 +100,6 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 			slog.Warn("PostgreSQL unavailable, long-term memory disabled", "error", err, "url", cfg.LongTerm.PostgresURL)
 		} else {
 			// Create embedder based on provider.
-			var embedder Embedder
 			switch cfg.LongTerm.Embedder.Provider {
 			case "ollama":
 				baseURL := cfg.LongTerm.Embedder.BaseURL
@@ -142,7 +142,8 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 	// Create episodic store.
 	var episodic EpisodicStore
 	if cfg.Episodic.Enabled && pool != nil {
-		episodic = NewPgEpisodicStore(pool, nil, tokenizer, nil, 1.0, 1.0, 60)
+		episodic = NewPgEpisodicStore(pool, nil, tokenizer, embedder,
+			cfg.LongTerm.Hybrid.FTSWeight, cfg.LongTerm.Hybrid.VectorWeight, cfg.LongTerm.Hybrid.RRFK)
 		slog.Info("episodic memory enabled")
 	}
 
