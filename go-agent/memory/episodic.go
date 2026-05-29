@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"strings"
+	"sort"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pgvector/pgvector-go"
 )
 
 // EpisodicStore manages cross-session conversation history.
@@ -22,18 +23,43 @@ type EpisodicStore interface {
 
 // PgEpisodicStore implements EpisodicStore using PostgreSQL + FTS.
 type PgEpisodicStore struct {
-	pool       *pgxpool.Pool
-	summarizer Summarizer
-	tokenizer  Tokenizer
+	pool         *pgxpool.Pool
+	summarizer   Summarizer
+	tokenizer    Tokenizer
+	embedder     Embedder
+	hasEmbedding bool
+	ftsWeight    float64
+	vectorWeight float64
+	rrfK         int
 }
 
 // NewPgEpisodicStore creates a new PG-backed episodic store.
-func NewPgEpisodicStore(pool *pgxpool.Pool, summarizer Summarizer, tokenizer Tokenizer) *PgEpisodicStore {
-	return &PgEpisodicStore{
-		pool:       pool,
-		summarizer: summarizer,
-		tokenizer:  tokenizer,
+func NewPgEpisodicStore(pool *pgxpool.Pool, summarizer Summarizer, tokenizer Tokenizer, embedder Embedder, ftsWeight, vectorWeight float64, rrfK int) *PgEpisodicStore {
+	s := &PgEpisodicStore{
+		pool:         pool,
+		summarizer:   summarizer,
+		tokenizer:    tokenizer,
+		embedder:     embedder,
+		ftsWeight:    ftsWeight,
+		vectorWeight: vectorWeight,
+		rrfK:         rrfK,
 	}
+
+	// Check if embedding column exists
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var colExists bool
+	err := pool.QueryRow(ctx,
+		"SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_name='episodes' AND column_name='embedding')",
+	).Scan(&colExists)
+	if err == nil && colExists {
+		s.hasEmbedding = true
+		slog.Info("[episodic] embedding column detected, hybrid search enabled")
+	} else {
+		slog.Info("[episodic] no embedding column, FTS-only mode")
+	}
+
+	return s
 }
 
 // SaveSession saves a session and its episodes to PostgreSQL with retry + jitter.
@@ -73,40 +99,46 @@ func (s *PgEpisodicStore) SaveSession(ctx context.Context, session Session) erro
 	})
 }
 
-// Search performs full-text search on episodes.
-// Splits query into keywords and matches any keyword via ILIKE for CJK compatibility.
+// Search performs hybrid FTS + vector search with RRF fusion.
 func (s *PgEpisodicStore) Search(ctx context.Context, query string, limit int) ([]Episode, error) {
 	if limit <= 0 {
 		limit = 5
 	}
 
-	// Split query into meaningful keywords (min 2 chars each).
-	keywords := splitKeywords(query)
-	if len(keywords) == 0 {
-		return nil, nil
+	// Path 1: FTS keyword search (always available)
+	ftsResults := s.ftsSearch(ctx, query, limit*2)
+
+	// Path 2: Vector semantic search (needs embedding column + embedder)
+	var vecResults []Episode
+	if s.hasEmbedding && s.embedder != nil {
+		vecResults = s.vectorSearch(ctx, query, limit*2, 0.3)
 	}
 
-	// Build OR conditions: content ILIKE '%kw1%' OR content ILIKE '%kw2%' ...
-	conditions := make([]string, len(keywords))
-	args := make([]any, len(keywords))
-	for i, kw := range keywords {
-		conditions[i] = fmt.Sprintf("content ILIKE $%d", i+1)
-		args[i] = "%" + kw + "%"
+	// No vector capability: return FTS results only
+	if len(vecResults) == 0 {
+		if len(ftsResults) > limit {
+			ftsResults = ftsResults[:limit]
+		}
+		return ftsResults, nil
 	}
-	where := strings.Join(conditions, " OR ")
 
-	sql := fmt.Sprintf(`
+	// RRF fusion
+	merged := s.rrfMerge(ftsResults, vecResults, limit)
+	return merged, nil
+}
+
+// ftsSearch performs full-text search using PostgreSQL tsvector.
+func (s *PgEpisodicStore) ftsSearch(ctx context.Context, query string, limit int) []Episode {
+	rows, err := s.pool.Query(ctx, `
 		SELECT id, session_id, role, content, created_at, token_count
 		FROM episodes
-		WHERE %s
-		ORDER BY created_at DESC
-		LIMIT $%d
-	`, where, len(keywords)+1)
-	args = append(args, limit)
-
-	rows, err := s.pool.Query(ctx, sql, args...)
+		WHERE fts_vector @@ plainto_tsquery('simple', $1)
+		ORDER BY ts_rank(fts_vector, plainto_tsquery('simple', $1)) DESC
+		LIMIT $2
+	`, query, limit)
 	if err != nil {
-		return nil, fmt.Errorf("search episodes: %w", err)
+		slog.Warn("[episodic] fts search failed", "error", err)
+		return nil
 	}
 	defer rows.Close()
 
@@ -114,31 +146,89 @@ func (s *PgEpisodicStore) Search(ctx context.Context, query string, limit int) (
 	for rows.Next() {
 		var ep Episode
 		if err := rows.Scan(&ep.ID, &ep.SessionID, &ep.Role, &ep.Content, &ep.CreatedAt, &ep.TokenCount); err != nil {
-			return nil, fmt.Errorf("scan episode: %w", err)
+			continue
 		}
 		episodes = append(episodes, ep)
 	}
-
-	return episodes, rows.Err()
+	return episodes
 }
 
-// splitKeywords splits a query into searchable keywords, filtering out short tokens.
-func splitKeywords(query string) []string {
-	// Split by common delimiters: spaces, punctuation, Chinese comma/period
-	f := func(r rune) bool {
-		return r == ' ' || r == ',' || r == '.' || r == '?' || r == '!' ||
-			r == '，' || r == '。' || r == '？' || r == '！' || r == '、' ||
-			r == '"' || r == '"' || r == '（' || r == '）' || r == '(' || r == ')'
+// vectorSearch performs semantic search using pgvector cosine distance.
+func (s *PgEpisodicStore) vectorSearch(ctx context.Context, query string, limit int, minScore float64) []Episode {
+	embedding, err := s.embedder.Embed(ctx, query)
+	if err != nil {
+		slog.Warn("[episodic] embedding generation failed", "error", err)
+		return nil
 	}
-	parts := strings.FieldsFunc(query, f)
-	var keywords []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if len([]rune(p)) >= 2 { // at least 2 characters
-			keywords = append(keywords, p)
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, session_id, role, content, created_at, token_count,
+		       1 - (embedding <=> $1) as similarity
+		FROM episodes
+		WHERE 1 - (embedding <=> $1) > $2
+		ORDER BY embedding <=> $1
+		LIMIT $3
+	`, pgvector.NewVector(toFloat32(embedding)), minScore, limit)
+	if err != nil {
+		slog.Warn("[episodic] vector search failed", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	var episodes []Episode
+	for rows.Next() {
+		var ep Episode
+		var similarity float64
+		if err := rows.Scan(&ep.ID, &ep.SessionID, &ep.Role, &ep.Content, &ep.CreatedAt, &ep.TokenCount, &similarity); err != nil {
+			continue
+		}
+		episodes = append(episodes, ep)
+	}
+	return episodes
+}
+
+// rrfMerge merges FTS and vector results using Reciprocal Rank Fusion.
+func (s *PgEpisodicStore) rrfMerge(ftsResults, vecResults []Episode, limit int) []Episode {
+	scores := make(map[string]float64)
+	episodeMap := make(map[string]Episode)
+
+	k := s.rrfK
+	if k <= 0 {
+		k = 60
+	}
+
+	for rank, ep := range ftsResults {
+		scores[ep.ID] += s.ftsWeight / (float64(k) + float64(rank+1))
+		episodeMap[ep.ID] = ep
+	}
+
+	for rank, ep := range vecResults {
+		scores[ep.ID] += s.vectorWeight / (float64(k) + float64(rank+1))
+		if _, exists := episodeMap[ep.ID]; !exists {
+			episodeMap[ep.ID] = ep
 		}
 	}
-	return keywords
+
+	type scored struct {
+		episode Episode
+		score   float64
+	}
+	var sorted []scored
+	for id, score := range scores {
+		sorted = append(sorted, scored{episodeMap[id], score})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].score > sorted[j].score
+	})
+
+	result := make([]Episode, 0, limit)
+	for i, se := range sorted {
+		if i >= limit {
+			break
+		}
+		result = append(result, se.episode)
+	}
+	return result
 }
 
 // Summarize uses an LLM to compress search results into a concise summary.

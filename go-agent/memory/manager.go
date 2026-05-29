@@ -142,7 +142,7 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 	// Create episodic store.
 	var episodic EpisodicStore
 	if cfg.Episodic.Enabled && pool != nil {
-		episodic = NewPgEpisodicStore(pool, nil, tokenizer)
+		episodic = NewPgEpisodicStore(pool, nil, tokenizer, nil, 1.0, 1.0, 60)
 		slog.Info("episodic memory enabled")
 	}
 
