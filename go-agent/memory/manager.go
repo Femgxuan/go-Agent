@@ -178,18 +178,26 @@ func (m *DefaultManager) Retrieve(ctx context.Context, query string, opts Retrie
 	// Working memory: always available.
 	result.WorkingMemory = m.working.GetWindow(opts.MaxTokens)
 
-	// Long-term memory: may fail, degrade to empty results.
-	if m.longTerm != nil {
-		slog.Info("[retrieve] searching long-term memory", "query", query, "maxFacts", opts.MaxFacts, "minScore", opts.MinScore)
-		facts, err := m.longTerm.Search(ctx, query, opts.MaxFacts, opts.MinScore)
+	// Episodic memory: search conversation history (primary search)
+	if m.episodic != nil {
+		slog.Info("[retrieve] searching episodic memory", "query", query, "maxFacts", opts.MaxFacts)
+		episodes, err := m.episodic.Search(ctx, query, opts.MaxFacts)
 		if err != nil {
-			slog.Warn("[retrieve] long-term memory search failed, degrading", "error", err)
+			slog.Warn("[retrieve] episodic memory search failed, degrading", "error", err)
 		} else {
-			slog.Info("[retrieve] found facts", "count", len(facts))
-			result.RelevantFacts = facts
+			slog.Info("[retrieve] found episodes", "count", len(episodes))
+			// Convert episodes to facts for compatibility
+			for _, ep := range episodes {
+				result.RelevantFacts = append(result.RelevantFacts, Fact{
+					ID:        ep.ID,
+					Content:   ep.Content,
+					Source:    "episodic",
+					CreatedAt: ep.CreatedAt,
+				})
+			}
 		}
 	} else {
-		slog.Info("[retrieve] long-term memory is nil, skipping search")
+		slog.Info("[retrieve] episodic memory is nil, skipping search")
 	}
 
 	// Meta memory: may fail, degrade to empty results.
