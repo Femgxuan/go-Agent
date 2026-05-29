@@ -13,6 +13,14 @@ type ProviderConfig struct {
 	Model   string `yaml:"model"`
 }
 
+// EmbeddingConfig holds configuration for the embedding model.
+type EmbeddingConfig struct {
+	Provider string `yaml:"provider"` // "openai" | "huggingface" | "modelscope"
+	APIKey   string `yaml:"api_key"`
+	BaseURL  string `yaml:"base_url"`
+	Model    string `yaml:"model"`
+}
+
 // TavilyConfig holds configuration for the Tavily search tool.
 type TavilyConfig struct {
 	APIKey string `yaml:"api_key"`
@@ -47,6 +55,7 @@ type Config struct {
 	DefaultProvider string                    `yaml:"default_provider"`
 	MaxIterations   int                       `yaml:"max_iterations"`
 	Providers       map[string]ProviderConfig `yaml:"providers"`
+	Embedding       EmbeddingConfig           `yaml:"embedding"`
 	Tools           ToolsConfig               `yaml:"tools"`
 	Display         DisplayConfig             `yaml:"display"`
 }

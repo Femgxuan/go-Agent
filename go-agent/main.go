@@ -50,7 +50,7 @@ func main() {
 	// 4. Initialize memory manager
 	memCfg := memory.DefaultConfig()
 	memory.ApplyEnvOverrides(memCfg)
-	memManager, memErr := memory.NewManager(memCfg)
+	memManager, memErr := memory.NewManager(memCfg, cfg)
 	if memErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: memory system unavailable: %v\n", memErr)
 	}

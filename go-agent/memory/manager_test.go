@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengxuan/go-agent/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +30,7 @@ func TestManager_StartSession(t *testing.T) {
 		},
 	}
 
-	mgr, err := NewManager(cfg)
+	mgr, err := NewManager(cfg, &config.Config{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -58,7 +59,7 @@ func TestManager_Store(t *testing.T) {
 		},
 	}
 
-	mgr, err := NewManager(cfg)
+	mgr, err := NewManager(cfg, &config.Config{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -95,7 +96,7 @@ func TestManager_Retrieve(t *testing.T) {
 		},
 	}
 
-	mgr, err := NewManager(cfg)
+	mgr, err := NewManager(cfg, &config.Config{})
 	require.NoError(t, err)
 
 	ctx := context.Background()
@@ -131,7 +132,7 @@ func TestManager_Memorize(t *testing.T) {
 		},
 	}
 
-	mgr, err := NewManager(cfg)
+	mgr, err := NewManager(cfg, &config.Config{})
 	require.NoError(t, err)
 
 	ctx := context.Background()

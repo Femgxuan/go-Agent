@@ -24,15 +24,10 @@ type Config struct {
 
 	// Long-term memory configuration
 	LongTerm struct {
-		PostgresURL string `yaml:"postgres_url" env:"MEMORY_LONGTERM_PG_URL"`
-		Embedder    struct {
-			Provider string `yaml:"provider" env:"MEMORY_EMBEDDER_PROVIDER"` // "openai" | "ollama"
-			APIKey   string `yaml:"api_key" env:"MEMORY_EMBEDDER_API_KEY"`
-			Model    string `yaml:"model" env:"MEMORY_EMBEDDER_MODEL"`
-			BaseURL  string `yaml:"base_url" env:"MEMORY_EMBEDDER_BASE_URL"` // for ollama
-		} `yaml:"embedder"`
-		HalfLife time.Duration `yaml:"half_life" env:"MEMORY_LONGTERM_HALF_LIFE"`
-		Hybrid   struct {
+		PostgresURL     string `yaml:"postgres_url" env:"MEMORY_LONGTERM_PG_URL"`
+		EmbedderProvider string `yaml:"embedder_provider" env:"MEMORY_EMBEDDER_PROVIDER"` // references top-level embedding config
+		HalfLife       time.Duration `yaml:"half_life" env:"MEMORY_LONGTERM_HALF_LIFE"`
+		Hybrid         struct {
 			FTSWeight    float64 `yaml:"fts_weight" env:"MEMORY_HYBRID_FTS_WEIGHT"`
 			VectorWeight float64 `yaml:"vector_weight" env:"MEMORY_HYBRID_VECTOR_WEIGHT"`
 			RRFK         int     `yaml:"rrf_k" env:"MEMORY_HYBRID_RRF_K"`
@@ -89,8 +84,7 @@ func DefaultConfig() *Config {
 
 	// Long-term memory defaults (匹配 docker-compose.yml 凭据)
 	cfg.LongTerm.PostgresURL = "postgres://FengXuan:12345678@localhost:5432/FengXuan"
-	cfg.LongTerm.Embedder.Provider = "openai"
-	cfg.LongTerm.Embedder.Model = "text-embedding-3-small"
+	cfg.LongTerm.EmbedderProvider = "openai"
 	cfg.LongTerm.HalfLife = 30 * 24 * time.Hour // 30 days
 	cfg.LongTerm.Hybrid.FTSWeight = 0.3
 	cfg.LongTerm.Hybrid.VectorWeight = 0.7
@@ -138,16 +132,7 @@ func ApplyEnvOverrides(cfg *Config) {
 		cfg.LongTerm.PostgresURL = v
 	}
 	if v := os.Getenv("MEMORY_EMBEDDER_PROVIDER"); v != "" {
-		cfg.LongTerm.Embedder.Provider = v
-	}
-	if v := os.Getenv("MEMORY_EMBEDDER_API_KEY"); v != "" {
-		cfg.LongTerm.Embedder.APIKey = v
-	}
-	if v := os.Getenv("MEMORY_EMBEDDER_MODEL"); v != "" {
-		cfg.LongTerm.Embedder.Model = v
-	}
-	if v := os.Getenv("MEMORY_EMBEDDER_BASE_URL"); v != "" {
-		cfg.LongTerm.Embedder.BaseURL = v
+		cfg.LongTerm.EmbedderProvider = v
 	}
 	if v := os.Getenv("MEMORY_HYBRID_FTS_WEIGHT"); v != "" {
 		if f, err := strconv.ParseFloat(v, 64); err == nil {

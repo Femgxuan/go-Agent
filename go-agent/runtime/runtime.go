@@ -91,7 +91,7 @@ func New(cfg Config) (*Runtime, error) {
 		slog.Info("[runtime] using pre-initialized memory manager")
 	} else {
 		var err error
-		memManager, err = memory.NewManager(memCfg)
+		memManager, err = memory.NewManager(memCfg, appCfg)
 		if err != nil {
 			slog.Warn("[runtime] memory system unavailable, falling back", "error", err)
 		}

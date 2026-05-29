@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fengxuan/go-agent/config"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -66,7 +67,7 @@ type DefaultManager struct {
 }
 
 // NewManager creates a new DefaultManager.
-func NewManager(cfg *Config) (*DefaultManager, error) {
+func NewManager(cfg *Config, appCfg *config.Config) (*DefaultManager, error) {
 	// Create tokenizer (prefer tiktoken, fallback to simple).
 	var tokenizer Tokenizer
 	tk, err := NewTiktokenTokenizer("gpt-4")
@@ -99,43 +100,44 @@ func NewManager(cfg *Config) (*DefaultManager, error) {
 		if err != nil {
 			slog.Warn("PostgreSQL unavailable, long-term memory disabled", "error", err, "url", cfg.LongTerm.PostgresURL)
 		} else {
-			// Create embedder based on provider.
-			switch cfg.LongTerm.Embedder.Provider {
+			// Create embedder based on provider from top-level embedding config.
+			embeddingCfg := appCfg.Embedding
+			switch embeddingCfg.Provider {
 			case "ollama":
-				baseURL := cfg.LongTerm.Embedder.BaseURL
+				baseURL := embeddingCfg.BaseURL
 				if baseURL == "" {
 					baseURL = "http://localhost:11434"
 				}
-				embedder = NewOllamaEmbedder(baseURL, cfg.LongTerm.Embedder.Model)
-				slog.Info("using Ollama embedder", "baseURL", baseURL, "model", cfg.LongTerm.Embedder.Model)
+				embedder = NewOllamaEmbedder(baseURL, embeddingCfg.Model)
+				slog.Info("using Ollama embedder", "baseURL", baseURL, "model", embeddingCfg.Model)
 			case "hash":
 				embedder = NewHashEmbedder(1536)
 				slog.Info("using hash embedder (no API needed)")
 			case "huggingface":
-				baseURL := cfg.LongTerm.Embedder.BaseURL
+				baseURL := embeddingCfg.BaseURL
 				if baseURL == "" {
-					baseURL = fmt.Sprintf("https://api-inference.huggingface.co/models/%s/embeddings", cfg.LongTerm.Embedder.Model)
+					baseURL = fmt.Sprintf("https://api-inference.huggingface.co/models/%s/embeddings", embeddingCfg.Model)
 				}
-				embedder = NewOpenAIEmbedder(cfg.LongTerm.Embedder.APIKey, cfg.LongTerm.Embedder.Model, baseURL)
-				slog.Info("using HuggingFace embedder", "baseURL", baseURL, "model", cfg.LongTerm.Embedder.Model)
+				embedder = NewOpenAIEmbedder(embeddingCfg.APIKey, embeddingCfg.Model, baseURL)
+				slog.Info("using HuggingFace embedder", "baseURL", baseURL, "model", embeddingCfg.Model)
 			case "modelscope":
-				baseURL := cfg.LongTerm.Embedder.BaseURL
+				baseURL := embeddingCfg.BaseURL
 				if baseURL == "" {
 					baseURL = "https://api-inference.modelscope.cn/v1/embeddings"
 				}
-				embedder = NewOpenAIEmbedder(cfg.LongTerm.Embedder.APIKey, cfg.LongTerm.Embedder.Model, baseURL)
-				slog.Info("using ModelScope embedder", "baseURL", baseURL, "model", cfg.LongTerm.Embedder.Model)
+				embedder = NewOpenAIEmbedder(embeddingCfg.APIKey, embeddingCfg.Model, baseURL)
+				slog.Info("using ModelScope embedder", "baseURL", baseURL, "model", embeddingCfg.Model)
 			default: // "openai"
-				if cfg.LongTerm.Embedder.APIKey == "" {
+				if embeddingCfg.APIKey == "" {
 					slog.Warn("OpenAI API key not set, falling back to hash embedder")
 					embedder = NewHashEmbedder(1536)
 				} else {
-					embedder = NewOpenAIEmbedder(cfg.LongTerm.Embedder.APIKey, cfg.LongTerm.Embedder.Model, "")
-					slog.Info("using OpenAI embedder", "model", cfg.LongTerm.Embedder.Model)
+					embedder = NewOpenAIEmbedder(embeddingCfg.APIKey, embeddingCfg.Model, "")
+					slog.Info("using OpenAI embedder", "model", embeddingCfg.Model)
 				}
 			}
 			longTerm = NewPgLongTermMemory(pool, embedder)
-			slog.Info("long-term memory enabled", "provider", cfg.LongTerm.Embedder.Provider, "postgres", cfg.LongTerm.PostgresURL)
+			slog.Info("long-term memory enabled", "provider", embeddingCfg.Provider, "postgres", cfg.LongTerm.PostgresURL)
 		}
 	}
 
