@@ -58,8 +58,9 @@ func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float64, err
 // EmbedBatch performs batch embedding
 func (e *OpenAIEmbedder) EmbedBatch(ctx context.Context, texts []string) ([][]float64, error) {
 	reqBody := map[string]any{
-		"input": texts,
-		"model": e.model,
+		"input":           texts,
+		"model":           e.model,
+		"encoding_format": "float",
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -120,6 +121,8 @@ func (e *OpenAIEmbedder) Dimension() int {
 	case "BAAI/bge-base-zh-v1.5":
 		return 768
 	case "BAAI/bge-large-zh-v1.5":
+		return 1024
+	case "Qwen/Qwen3-Embedding-0.6B":
 		return 1024
 	default:
 		return 1536
