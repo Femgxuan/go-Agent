@@ -50,6 +50,22 @@ func main() {
 	// 4. Initialize memory manager
 	memCfg := memory.DefaultConfig()
 	memory.ApplyEnvOverrides(memCfg)
+	// Override with values from config.yaml
+	if cfg.Memory.LongTerm.PostgresURL != "" {
+		memCfg.LongTerm.PostgresURL = cfg.Memory.LongTerm.PostgresURL
+	}
+	if cfg.Memory.LongTerm.EmbedderProvider != "" {
+		memCfg.LongTerm.EmbedderProvider = cfg.Memory.LongTerm.EmbedderProvider
+	}
+	if cfg.Memory.LongTerm.Hybrid.FTSWeight > 0 {
+		memCfg.LongTerm.Hybrid.FTSWeight = cfg.Memory.LongTerm.Hybrid.FTSWeight
+	}
+	if cfg.Memory.LongTerm.Hybrid.VectorWeight > 0 {
+		memCfg.LongTerm.Hybrid.VectorWeight = cfg.Memory.LongTerm.Hybrid.VectorWeight
+	}
+	if cfg.Memory.LongTerm.Hybrid.RRFK > 0 {
+		memCfg.LongTerm.Hybrid.RRFK = cfg.Memory.LongTerm.Hybrid.RRFK
+	}
 	memManager, memErr := memory.NewManager(memCfg, cfg)
 	if memErr != nil {
 		fmt.Fprintf(os.Stderr, "warning: memory system unavailable: %v\n", memErr)
