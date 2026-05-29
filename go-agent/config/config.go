@@ -50,12 +50,29 @@ type DisplayConfig struct {
 	ShowThinking      bool   `yaml:"show_thinking"`       // show <thinking> blocks in main output
 }
 
+// MemoryLongTermConfig holds long-term memory configuration.
+type MemoryLongTermConfig struct {
+	PostgresURL      string `yaml:"postgres_url"`
+	EmbedderProvider string `yaml:"embedder_provider"`
+	Hybrid           struct {
+		FTSWeight    float64 `yaml:"fts_weight"`
+		VectorWeight float64 `yaml:"vector_weight"`
+		RRFK         int     `yaml:"rrf_k"`
+	} `yaml:"hybrid"`
+}
+
+// MemoryConfig holds memory system configuration.
+type MemoryConfig struct {
+	LongTerm MemoryLongTermConfig `yaml:"long_term"`
+}
+
 // Config is the top-level configuration structure.
 type Config struct {
 	DefaultProvider string                    `yaml:"default_provider"`
 	MaxIterations   int                       `yaml:"max_iterations"`
 	Providers       map[string]ProviderConfig `yaml:"providers"`
 	Embedding       EmbeddingConfig           `yaml:"embedding"`
+	Memory          MemoryConfig              `yaml:"memory"`
 	Tools           ToolsConfig               `yaml:"tools"`
 	Display         DisplayConfig             `yaml:"display"`
 }

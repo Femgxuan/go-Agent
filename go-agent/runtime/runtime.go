@@ -83,6 +83,22 @@ func New(cfg Config) (*Runtime, error) {
 	// Initialize memory system.
 	memCfg := memory.DefaultConfig()
 	memory.ApplyEnvOverrides(memCfg)
+	// Override with values from config.yaml
+	if appCfg.Memory.LongTerm.PostgresURL != "" {
+		memCfg.LongTerm.PostgresURL = appCfg.Memory.LongTerm.PostgresURL
+	}
+	if appCfg.Memory.LongTerm.EmbedderProvider != "" {
+		memCfg.LongTerm.EmbedderProvider = appCfg.Memory.LongTerm.EmbedderProvider
+	}
+	if appCfg.Memory.LongTerm.Hybrid.FTSWeight > 0 {
+		memCfg.LongTerm.Hybrid.FTSWeight = appCfg.Memory.LongTerm.Hybrid.FTSWeight
+	}
+	if appCfg.Memory.LongTerm.Hybrid.VectorWeight > 0 {
+		memCfg.LongTerm.Hybrid.VectorWeight = appCfg.Memory.LongTerm.Hybrid.VectorWeight
+	}
+	if appCfg.Memory.LongTerm.Hybrid.RRFK > 0 {
+		memCfg.LongTerm.Hybrid.RRFK = appCfg.Memory.LongTerm.Hybrid.RRFK
+	}
 	slog.Info("[runtime] memory config", "postgres_url", memCfg.LongTerm.PostgresURL, "working_max_tokens", memCfg.Working.MaxTokens)
 
 	var memManager memory.Manager
